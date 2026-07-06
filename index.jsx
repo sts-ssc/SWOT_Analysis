@@ -96,21 +96,19 @@ function parseList(txt) {
   return result;
 }
 
-// Call 1: Kontext
+// Call 1: Kontext (kurz, schnell)
 async function fetchContext(p) {
   const prompt =
-`Branchenanalyse für ${p.name} (${p.industry}, ${p.product}, ${p.size}).
-Antworte EXAKT in diesem Format, keine weiteren Texte:
-MARKT: 2 Sätze zu Marktgrösse und Trends
-WETTBEWERB: 1 Satz zu wichtigsten Wettbewerbertypen
-KUNDEN: 1 Satz zu Kundensegmenten und Kaufkriterien
-REGULIERUNG: 1 Satz zu regulatorischen Anforderungen Schweiz
-Deutsch, kein ß.`;
-  const txt = await callClaude(prompt, 400);
+`Für ${p.name} (${p.industry}, ${p.size}):
+MARKT: [1 Satz Markt/Trend]
+WETTBEWERB: [1 Satz Wettbewerber]
+KUNDEN: [1 Satz Kunden]
+REGULIERUNG: [1 Satz Regulierung CH]`;
+  const txt = await callClaude(prompt, 200);
   return parseContext(txt);
 }
 
-// Calls 2–5: je eine SWOT-Kategorie
+// Calls 2–5: SWOT-Kategorien (ohne Kontext-Abhängigkeit, läuft parallel)
 const CAT_PROMPTS = {
   strengths:     { de: "Stärken"   },
   weaknesses:    { de: "Schwächen" },
@@ -118,21 +116,18 @@ const CAT_PROMPTS = {
   threats:       { de: "Risiken"   },
 };
 
-async function fetchCategory(cat, p, ctx) {
+async function fetchCategory(cat, p) {
   const cp = CAT_PROMPTS[cat];
   const prompt =
-`Senior-Unternehmensberater. 6 ${cp.de} für ${p.name} (${p.industry}, ${p.size}).
-Markt: ${ctx.market.slice(0, 150)}
-
-Antworte EXAKT in diesem Format, kein JSON, keine Ergänzungen:
-1. Bezeichnung max 8 Wörter | Begründung max 12 Wörter
-2. Bezeichnung max 8 Wörter | Begründung max 12 Wörter
-3. Bezeichnung max 8 Wörter | Begründung max 12 Wörter
-4. Bezeichnung max 8 Wörter | Begründung max 12 Wörter
-5. Bezeichnung max 8 Wörter | Begründung max 12 Wörter
-6. Bezeichnung max 8 Wörter | Begründung max 12 Wörter
-Deutsch, kein ß.`;
-  const txt = await callClaude(prompt, 500);
+`6 ${cp.de} für ${p.name} (${p.industry}). Format exakt so:
+1. Text | Grund
+2. Text | Grund
+3. Text | Grund
+4. Text | Grund
+5. Text | Grund
+6. Text | Grund
+Deutsch, kein ß, max 8+10 Wörter pro Zeile.`;
+  const txt = await callClaude(prompt, 300);
   return parseList(txt);
 }
 
@@ -272,32 +267,22 @@ export default function SWOTApp() {
     setItems(updated); save({ items: updated });
   };
 
-  // ── 5 separate AI calls ──────────────────────────────────────────────────────
+  // ── Alle 5 Calls parallel ────────────────────────────────────────────────────
   const startAnalysis = async () => {
     if (!profile.name || !profile.industry || !profile.product) {
       showToast("Bitte Name, Branche und Produkt ausfüllen"); return;
     }
-    setGenError(""); setLoading(true);
+    setGenError(""); setLoading(true); setLoadingStep(1);
 
     try {
-      // Call 1: Kontext
-      setLoadingStep(1);
-      const ctx = await fetchContext(profile);
-
-      // Call 2: Stärken
-      setLoadingStep(2);
-      const strengths = await fetchCategory("strengths", profile, ctx);
-
-      // Call 3: Schwächen
-      setLoadingStep(3);
-      const weaknesses = await fetchCategory("weaknesses", profile, ctx);
-
-      // Call 4: Chancen
-      setLoadingStep(4);
-      const opportunities = await fetchCategory("opportunities", profile, ctx);
-
-      // Call 5: Risiken
-      setLoadingStep(5);
+      // Alle 5 Calls gleichzeitig – fertig in ~3-5 Sek. statt 30+
+      const [ctx, strengths, weaknesses, opportunities, threats] = await Promise.all([
+        fetchContext(profile),
+        fetchCategory("strengths",     profile),
+        fetchCategory("weaknesses",    profile),
+        fetchCategory("opportunities", profile),
+        fetchCategory("threats",       profile),
+      ]);
       const threats = await fetchCategory("threats", profile, ctx);
 
       const parsed = { context: ctx, strengths, weaknesses, opportunities, threats };
@@ -413,27 +398,22 @@ Risiken: ${items.threats.join(" | ") || "–"}
             </div>
           )}
 
-          {/* ── Loading mit Fortschritt ── */}
+          {/* ── Loading ── */}
           {loading && (
             <div style={{ ...S.card, padding: 40, textAlign: "center" }}>
-              <div style={{ fontSize: 28, marginBottom: 14 }}>⚙️</div>
-              <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>Analyse läuft</div>
-              <div style={{ fontSize: 13, color: "#64748b", marginBottom: 24 }}>5 Analysen werden durchgeführt</div>
-              <div style={{ maxWidth: 340, margin: "0 auto", textAlign: "left" }}>
-                {LOADING_STEPS.map((ls, i) => {
-                  const idx = i + 1;
-                  const done = loadingStep > idx;
-                  const active = loadingStep === idx;
-                  return (
-                    <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13, padding: "9px 14px", borderRadius: 8, marginBottom: 6, background: done ? "#f0fdf4" : active ? "#eff6ff" : "#f8fafc", border: `0.5px solid ${done ? "#bbf7d0" : active ? "#bfdbfe" : "#e2e8f0"}`, color: done ? "#15803d" : active ? "#1e40af" : "#94a3b8" }}>
-                      <span style={{ fontSize: 16, width: 24, textAlign: "center" }}>
-                        {done ? "✓" : active ? "⏳" : ls.icon}
-                      </span>
-                      <span style={{ fontWeight: active ? 600 : 400 }}>{ls.label}</span>
-                    </div>
-                  );
-                })}
+              <div style={{ fontSize: 32, marginBottom: 14, animation: "spin 2s linear infinite", display: "inline-block" }}>⚙️</div>
+              <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 6 }}>Analyse läuft</div>
+              <div style={{ fontSize: 13, color: "#64748b", marginBottom: 20 }}>
+                Branchenanalyse und alle 4 SWOT-Felder werden gleichzeitig generiert
               </div>
+              <div style={{ display: "flex", justifyContent: "center", gap: 8, flexWrap: "wrap" }}>
+                {["Kontext", "Stärken", "Schwächen", "Chancen", "Risiken"].map((lbl, i) => (
+                  <div key={i} style={{ fontSize: 12, padding: "5px 12px", borderRadius: 20, background: "#eff6ff", border: "0.5px solid #bfdbfe", color: "#1e40af" }}>
+                    ⏳ {lbl}
+                  </div>
+                ))}
+              </div>
+              <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
             </div>
           )}
 
