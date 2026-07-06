@@ -68,20 +68,7 @@ async function callClaude(prompt, maxTokens = 400, model = "claude-haiku-4-5-202
   return j.content?.[0]?.text || "";
 }
 
-// ── Kein JSON von Claude – robustes Textformat ────────────────────────────────
-
-function parseContext(txt) {
-  const get = (key) => {
-    const m = txt.match(new RegExp(key + "[:\\s]+(.+?)(?=\\n[A-Z]+[:\\s]|$)", "s"));
-    return m ? m[1].replace(/\n/g, " ").trim() : "";
-  };
-  return {
-    market:      get("MARKT"),
-    competitors: get("WETTBEWERB"),
-    customers:   get("KUNDEN"),
-    regulations: get("REGULIERUNG"),
-  };
-}
+// ── EIN einziger Call für die gesamte Analyse (Haiku, ~3 Sek.) ───────────────
 
 function parseList(txt) {
   const lines = txt.split("\n").map(l => l.trim()).filter(l => /^\d+[\.\):]/.test(l));
@@ -96,39 +83,73 @@ function parseList(txt) {
   return result;
 }
 
-// Call 1: Kontext (kurz, schnell)
-async function fetchContext(p) {
-  const prompt =
-`Für ${p.name} (${p.industry}, ${p.size}):
-MARKT: [1 Satz Markt/Trend]
-WETTBEWERB: [1 Satz Wettbewerber]
-KUNDEN: [1 Satz Kunden]
-REGULIERUNG: [1 Satz Regulierung CH]`;
-  const txt = await callClaude(prompt, 200);
-  return parseContext(txt);
+function parseAllSWOT(txt) {
+  const getLine = (key) => {
+    const m = txt.match(new RegExp(key + "[:\\s]+(.+?)(?=\\n|$)"));
+    return m ? m[1].trim() : "";
+  };
+  const getSection = (key) => {
+    const m = txt.match(new RegExp(key + "[:\\s]*\\n([\\s\\S]+?)(?=\\n[A-Z]{4,}[:\\s]|$)"));
+    return m ? parseList(m[1]) : [];
+  };
+  return {
+    context: {
+      market:      getLine("MARKET"),
+      competitors: getLine("COMPETITION"),
+      customers:   getLine("CUSTOMERS"),
+      regulations: getLine("REGULATIONS"),
+    },
+    strengths:     getSection("STRENGTHS"),
+    weaknesses:    getSection("WEAKNESSES"),
+    opportunities: getSection("OPPORTUNITIES"),
+    threats:       getSection("THREATS"),
+  };
 }
 
-// Calls 2–5: SWOT-Kategorien (ohne Kontext-Abhängigkeit, läuft parallel)
-const CAT_PROMPTS = {
-  strengths:     { de: "Stärken"   },
-  weaknesses:    { de: "Schwächen" },
-  opportunities: { de: "Chancen"   },
-  threats:       { de: "Risiken"   },
-};
-
-async function fetchCategory(cat, p) {
-  const cp = CAT_PROMPTS[cat];
+async function fetchAllSWOT(p) {
   const prompt =
-`6 ${cp.de} für ${p.name} (${p.industry}). Format exakt so:
-1. Text | Grund
-2. Text | Grund
-3. Text | Grund
-4. Text | Grund
-5. Text | Grund
-6. Text | Grund
-Deutsch, kein ß, max 8+10 Wörter pro Zeile.`;
-  const txt = await callClaude(prompt, 300);
-  return parseList(txt);
+`Analyse: ${p.name}, ${p.industry}, ${p.product}, ${p.size}.
+Antworte EXAKT so (kein JSON, keine Ergänzungen):
+
+MARKET: 1 Satz
+COMPETITION: 1 Satz
+CUSTOMERS: 1 Satz
+REGULATIONS: 1 Satz
+
+STRENGTHS:
+1. Bezeichnung | Begründung
+2. Bezeichnung | Begründung
+3. Bezeichnung | Begründung
+4. Bezeichnung | Begründung
+5. Bezeichnung | Begründung
+6. Bezeichnung | Begründung
+
+WEAKNESSES:
+1. Bezeichnung | Begründung
+2. Bezeichnung | Begründung
+3. Bezeichnung | Begründung
+4. Bezeichnung | Begründung
+5. Bezeichnung | Begründung
+6. Bezeichnung | Begründung
+
+OPPORTUNITIES:
+1. Bezeichnung | Begründung
+2. Bezeichnung | Begründung
+3. Bezeichnung | Begründung
+4. Bezeichnung | Begründung
+5. Bezeichnung | Begründung
+6. Bezeichnung | Begründung
+
+THREATS:
+1. Bezeichnung | Begründung
+2. Bezeichnung | Begründung
+3. Bezeichnung | Begründung
+4. Bezeichnung | Begründung
+5. Bezeichnung | Begründung
+6. Bezeichnung | Begründung
+
+Deutsch, kein ß, max 8 Wörter Bezeichnung, max 12 Wörter Begründung.`;
+  return await callClaude(prompt, 700, "claude-haiku-4-5-20251001");
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
@@ -267,7 +288,7 @@ export default function SWOTApp() {
     setItems(updated); save({ items: updated });
   };
 
-  // ── Alle 5 Calls parallel ────────────────────────────────────────────────────
+  // ── EIN Call für alles ───────────────────────────────────────────────────────
   const startAnalysis = async () => {
     if (!profile.name || !profile.industry || !profile.product) {
       showToast("Bitte Name, Branche und Produkt ausfüllen"); return;
@@ -275,17 +296,8 @@ export default function SWOTApp() {
     setGenError(""); setLoading(true); setLoadingStep(1);
 
     try {
-      // Alle 5 Calls gleichzeitig – fertig in ~3-5 Sek. statt 30+
-      const [ctx, strengths, weaknesses, opportunities, threats] = await Promise.all([
-        fetchContext(profile),
-        fetchCategory("strengths",     profile),
-        fetchCategory("weaknesses",    profile),
-        fetchCategory("opportunities", profile),
-        fetchCategory("threats",       profile),
-      ]);
-      const threats = await fetchCategory("threats", profile, ctx);
-
-      const parsed = { context: ctx, strengths, weaknesses, opportunities, threats };
+      const txt = await fetchAllSWOT(profile);
+      const parsed = parseAllSWOT(txt);
       setAiData(parsed);
       save({ aiData: parsed, step: 1 });
       setStep(1);
