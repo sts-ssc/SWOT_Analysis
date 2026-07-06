@@ -69,20 +69,32 @@ async function callClaude(prompt, maxTokens = 800) {
 }
 
 function parseJSON(txt) {
-  const m = txt.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
-  if (!m) throw new Error("Kein JSON in der Antwort gefunden");
-  return JSON.parse(m[0]);
+  // Markdown-Blöcke entfernen
+  const clean = txt.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+  // Direkt parsen
+  try { return JSON.parse(clean); } catch(e) {}
+  // JSON-Array suchen
+  try {
+    const m = clean.match(/\[[\s\S]*\]/);
+    if (m) return JSON.parse(m[0]);
+  } catch(e) {}
+  // JSON-Objekt suchen
+  try {
+    const m = clean.match(/\{[\s\S]*\}/);
+    if (m) return JSON.parse(m[0]);
+  } catch(e) {}
+  throw new Error("JSON konnte nicht verarbeitet werden. Bitte nochmals versuchen.");
 }
 
 // Call 1: Marktkontext
 async function fetchContext(p) {
-  const prompt = `Du bist Senior-Unternehmensberater. Analysiere:
-Unternehmen: ${p.name} | Branche: ${p.industry} | Leistung: ${p.product}
-Konkurrenten: ${p.competitors || "identifiziere typische"} | Grösse: ${p.size} | Ziel: ${p.goal}
+  const prompt = `Senior-Unternehmensberater. Branchenanalyse für: ${p.name}, ${p.industry}, ${p.product}, ${p.size}.
+Konkurrenten: ${p.competitors || "typische identifizieren"}.
 
-Antworte NUR mit JSON (kein Markdown):
-{"market":"3 Sätze Markt/Trends","competitors":"Wettbewerbertypen und Dynamik","customers":"Kundensegmente und Kaufkriterien","regulations":"Regulatorische Anforderungen Schweiz"}`;
-  const txt = await callClaude(prompt, 600);
+Antworte NUR mit diesem JSON, kein Markdown, keine weiteren Texte:
+{"market":"2 Sätze Markt und Trends","competitors":"Wettbewerbertypen kurz","customers":"Kundensegmente und Kaufkriterien kurz","regulations":"Regulatorische Anforderungen Schweiz kurz"}
+Deutsch, kein ß.`;
+  const txt = await callClaude(prompt, 700);
   return parseJSON(txt);
 }
 
@@ -96,15 +108,21 @@ const CAT_PROMPTS = {
 
 async function fetchCategory(cat, p, ctx) {
   const cp = CAT_PROMPTS[cat];
-  const prompt = `Du bist Senior-Unternehmensberater. Generiere 6 ${cp.de} für:
-Unternehmen: ${p.name} | Branche: ${p.industry} | Leistung: ${p.product} | Grösse: ${p.size}
-Marktkontext: ${ctx.market} | Wettbewerb: ${ctx.competitors}
+  const prompt = `Senior-Unternehmensberater. Generiere exakt 6 ${cp.de}.
+Kontext: ${p.name}, ${p.industry}, ${p.product}, ${p.size}
+Markt: ${ctx.market.slice(0, 200)}
 
-Fokus auf: ${cp.instr}
-Antworte NUR mit JSON-Array (kein Markdown):
-[{"item":"max. 8 Wörter","reason":"1 prägnanter Satz mit Marktbezug"},{"item":"...","reason":"..."},{"item":"...","reason":"..."},{"item":"...","reason":"..."},{"item":"...","reason":"..."},{"item":"...","reason":"..."}]
-Sprache: Deutsch, Schweizer Stil (kein ß).`;
-  const txt = await callClaude(prompt, 700);
+Antworte NUR mit diesem JSON-Array, keine weiteren Texte, kein Markdown:
+[
+{"item":"Kurzbezeichnung max 7 Wörter","reason":"Begründung max 12 Wörter"},
+{"item":"...","reason":"..."},
+{"item":"...","reason":"..."},
+{"item":"...","reason":"..."},
+{"item":"...","reason":"..."},
+{"item":"...","reason":"..."}
+]
+Deutsch, kein ß, keine eckigen Klammern in item/reason.`;
+  const txt = await callClaude(prompt, 1200);
   return parseJSON(txt);
 }
 
