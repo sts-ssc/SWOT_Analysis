@@ -52,12 +52,12 @@ const STORAGE_KEY = "swot_analyse_v2";
 
 // ─── AI helpers (5 separate calls) ────────────────────────────────────────────
 
-async function callClaude(prompt, maxTokens = 800) {
+async function callClaude(prompt, maxTokens = 400, model = "claude-haiku-4-5-20251001") {
   const res = await fetch("/api/claude", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "claude-sonnet-4-6",
+      model,
       max_tokens: maxTokens,
       messages: [{ role: "user", content: prompt }],
     }),
@@ -311,7 +311,7 @@ Risiken: ${items.threats.join(" | ") || "–"}
 ## ST – Absichern (Stärken + Risiken): 3 Massnahmen.
 ## WT – Vermeiden (Schwächen + Risiken): 3 Massnahmen.`;
     try {
-      const txt = await callClaude(prompt, 900);
+      const txt = await callClaude(prompt, 900, "claude-sonnet-4-6");
       setTwText(txt);
     } catch(e) { setTwError(e.message || String(e)); }
     setTwLoad(false);
