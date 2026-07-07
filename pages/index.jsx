@@ -1,55 +1,63 @@
 // pages/index.jsx  –  SWOT-Analyse Builder
 // Next.js + Vercel + Anthropic API Proxy
-// API calls gehen via /api/claude (kein direkter Browser→Anthropic Call)
+// 5 separate API-Calls statt einem grossen (verhindert JSON-Truncation)
 
 import { useState, useEffect } from "react";
 import Head from "next/head";
 
-// ─── Config ──────────────────────────────────────────────────────────────────
+// ─── Config ───────────────────────────────────────────────────────────────────
 
 const STEPS = [
-  { id: "profile",      label: "Unternehmen" },
-  { id: "strengths",    label: "Stärken"     },
-  { id: "weaknesses",   label: "Schwächen"   },
-  { id: "opportunities",label: "Chancen"     },
-  { id: "threats",      label: "Risiken"     },
-  { id: "matrix",       label: "Matrix"      },
-  { id: "tows",         label: "TOWS"        },
-  { id: "download",     label: "Download"    },
+  { id: "profile",       label: "Unternehmen" },
+  { id: "strengths",     label: "Stärken"     },
+  { id: "weaknesses",    label: "Schwächen"   },
+  { id: "opportunities", label: "Chancen"     },
+  { id: "threats",       label: "Risiken"     },
+  { id: "matrix",        label: "Matrix"      },
+  { id: "tows",          label: "TOWS"        },
+  { id: "download",      label: "Download"    },
 ];
 
 const CAT = {
-  strengths:    { label: "Stärken (Strengths)",     short: "Stärken",   head: "#16a34a", bg: "#f0fdf4", text: "#14532d" },
-  weaknesses:   { label: "Schwächen (Weaknesses)",  short: "Schwächen", head: "#dc2626", bg: "#fef2f2", text: "#7f1d1d" },
-  opportunities:{ label: "Chancen (Opportunities)", short: "Chancen",   head: "#2563eb", bg: "#eff6ff", text: "#1e3a8a" },
-  threats:      { label: "Risiken (Threats)",       short: "Risiken",   head: "#d97706", bg: "#fffbeb", text: "#78350f" },
+  strengths:     { label: "Stärken (Strengths)",     short: "Stärken",   head: "#16a34a", bg: "#f0fdf4", text: "#14532d" },
+  weaknesses:    { label: "Schwächen (Weaknesses)",  short: "Schwächen", head: "#dc2626", bg: "#fef2f2", text: "#7f1d1d" },
+  opportunities: { label: "Chancen (Opportunities)", short: "Chancen",   head: "#2563eb", bg: "#eff6ff", text: "#1e3a8a" },
+  threats:       { label: "Risiken (Threats)",       short: "Risiken",   head: "#d97706", bg: "#fffbeb", text: "#78350f" },
 };
 const CAT_ORDER = ["strengths", "weaknesses", "opportunities", "threats"];
 
 const TOWS_DEF = [
   { k: "SO", t: "SO – Ausbauen",  s: "Stärken × Chancen",  bg: "#f0fdf4", tc: "#14532d" },
   { k: "WO", t: "WO – Aufholen", s: "Schwächen × Chancen", bg: "#eff6ff", tc: "#1e3a8a" },
-  { k: "ST", t: "ST – Absichern",s: "Stärken × Risiken",   bg: "#fffbeb", tc: "#78350f" },
-  { k: "WT", t: "WT – Vermeiden",s: "Schwächen × Risiken", bg: "#fef2f2", tc: "#7f1d1d" },
+  { k: "ST", t: "ST – Absichern", s: "Stärken × Risiken",  bg: "#fffbeb", tc: "#78350f" },
+  { k: "WT", t: "WT – Vermeiden", s: "Schwächen × Risiken",bg: "#fef2f2", tc: "#7f1d1d" },
 ];
 
 const TIPS = {
-  strengths:    "Fokus auf Merkmale, die schwer zu kopieren sind: Know-how, Referenzen, Zertifizierungen, Netzwerk.",
-  weaknesses:   "Nur erkannte Schwächen können behoben werden. Verlorene Aufträge und Kundenfeedback sind gute Quellen.",
-  opportunities:"Denken Sie in Trends: Digitalisierung, neue Gesetze, Technologien, Marktveränderungen.",
-  threats:      "Beurteilen Sie Wahrscheinlichkeit und Auswirkung. Nicht jedes Risiko muss aktiv bekämpft werden.",
+  strengths:     "Fokus auf Merkmale, die schwer zu kopieren sind: Know-how, Referenzen, Zertifizierungen, Netzwerk.",
+  weaknesses:    "Nur erkannte Schwächen können behoben werden. Verlorene Aufträge und Kundenfeedback sind gute Quellen.",
+  opportunities: "Denken Sie in Trends: Digitalisierung, neue Gesetze, Technologien, Marktveränderungen.",
+  threats:       "Beurteilen Sie Wahrscheinlichkeit und Auswirkung. Nicht jedes Risiko muss aktiv bekämpft werden.",
 };
 
-const STORAGE_KEY = "swot_analyse_v1";
+const LOADING_STEPS = [
+  { label: "Branchenanalyse & Marktkontext",       icon: "📊" },
+  { label: "Stärken werden analysiert",            icon: "💪" },
+  { label: "Schwächen werden analysiert",          icon: "⚠️" },
+  { label: "Chancen werden identifiziert",         icon: "🚀" },
+  { label: "Risiken werden bewertet",              icon: "🛡️" },
+];
 
-// ─── AI helper ───────────────────────────────────────────────────────────────
+const STORAGE_KEY = "swot_analyse_v2";
 
-async function callClaude(prompt, maxTokens = 2800) {
-  const res = await fetch("/api/claude", {            // ← Vercel-Proxy, kein direkter Browser-Call
+// ─── AI helpers (5 separate calls) ────────────────────────────────────────────
+
+async function callClaude(prompt, maxTokens = 400, model = "claude-haiku-4-5-20251001") {
+  const res = await fetch("/api/claude", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "claude-sonnet-4-6",
+      model,
       max_tokens: maxTokens,
       messages: [{ role: "user", content: prompt }],
     }),
@@ -60,7 +68,51 @@ async function callClaude(prompt, maxTokens = 2800) {
   return j.content?.[0]?.text || "";
 }
 
-// ─── Styles (inline, kein externes CSS nötig) ────────────────────────────────
+// ── 5 sequentielle Calls, einer nach dem anderen ──────────────────────────────
+
+function parseList(txt) {
+  const lines = txt.split("\n").map(l => l.trim()).filter(l => /^\d+[\.\):]/.test(l));
+  const result = lines.slice(0, 6).map(l => {
+    const content = l.replace(/^\d+[\.\):]\s*/, "").trim();
+    const sepIdx  = content.indexOf("|");
+    return sepIdx > -1
+      ? { item: content.slice(0, sepIdx).trim(), reason: content.slice(sepIdx + 1).trim() }
+      : { item: content, reason: "" };
+  });
+  while (result.length < 6) result.push({ item: `Punkt ${result.length + 1}`, reason: "" });
+  return result;
+}
+
+// Call 1: Marktkontext
+async function fetchContext(p) {
+  const txt = await callClaude(
+`Branchenanalyse fuer ${p.name} (${p.industry}, ${p.size}).
+Format exakt:
+MARKET: 1 Satz
+COMPETITION: 1 Satz
+CUSTOMERS: 1 Satz
+REGULATIONS: 1 Satz
+Deutsch, kein ss statt ss.`, 200);
+  const get = (k) => { const m = txt.match(new RegExp(k + "[:\\s]+(.+?)(?=\\n|$)")); return m ? m[1].trim() : ""; };
+  return { market: get("MARKET"), competitors: get("COMPETITION"), customers: get("CUSTOMERS"), regulations: get("REGULATIONS") };
+}
+
+// Calls 2-5: Je eine SWOT-Kategorie
+async function fetchCategory(cat, p) {
+  const labels = { strengths: "Staerken", weaknesses: "Schwaechen", opportunities: "Chancen", threats: "Risiken" };
+  const txt = await callClaude(
+`6 ${labels[cat]} fuer ${p.name} (${p.industry}). Format exakt:
+1. Bezeichnung | Begruendung
+2. Bezeichnung | Begruendung
+3. Bezeichnung | Begruendung
+4. Bezeichnung | Begruendung
+5. Bezeichnung | Begruendung
+6. Bezeichnung | Begruendung
+Deutsch, max 8+12 Woerter pro Zeile.`, 300);
+  return parseList(txt);
+}
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
 
 const S = {
   page:   { fontFamily: "system-ui, -apple-system, sans-serif", background: "#f1f5f9", minHeight: "100vh", fontSize: 14, color: "#1e293b" },
@@ -81,7 +133,7 @@ const S = {
   toast:  { position: "fixed", bottom: 20, right: 20, background: "#0f172a", color: "#e2e8f0", padding: "9px 16px", borderRadius: 8, fontSize: 13, zIndex: 300 },
 };
 
-// ─── Sub-components ──────────────────────────────────────────────────────────
+// ─── Sub-components ───────────────────────────────────────────────────────────
 
 function Field({ label, value, onChange, placeholder, hint, textarea, rows = 3 }) {
   return (
@@ -128,7 +180,7 @@ function CtxPanel({ ctx, open, toggle }) {
 
 function SugCard({ item, reason, accepted, onClick }) {
   return (
-    <div onClick={onClick} style={{ display: "flex", gap: 9, padding: "9px 10px", border: `0.5px solid ${accepted ? "#bbf7d0" : "#e2e8f0"}`, borderRadius: 8, cursor: accepted ? "default" : "pointer", background: accepted ? "#f0fdf4" : "white", transition: "border-color 0.15s" }}>
+    <div onClick={onClick} style={{ display: "flex", gap: 9, padding: "9px 10px", border: `0.5px solid ${accepted ? "#bbf7d0" : "#e2e8f0"}`, borderRadius: 8, cursor: accepted ? "default" : "pointer", background: accepted ? "#f0fdf4" : "white" }}>
       <div style={{ flexShrink: 0, width: 22, height: 22, borderRadius: "50%", background: accepted ? "#16a34a" : "#f1f5f9", border: `0.5px solid ${accepted ? "#16a34a" : "#d1d5db"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, color: accepted ? "white" : "#64748b", marginTop: 1 }}>
         {accepted ? "✓" : "+"}
       </div>
@@ -140,7 +192,7 @@ function SugCard({ item, reason, accepted, onClick }) {
   );
 }
 
-// ─── Main App ────────────────────────────────────────────────────────────────
+// ─── Main App ─────────────────────────────────────────────────────────────────
 
 export default function SWOTApp() {
   const [step, setStep]         = useState(0);
@@ -149,6 +201,7 @@ export default function SWOTApp() {
   const [strategies, setStrats] = useState({ SO: "", WO: "", ST: "", WT: "" });
   const [aiData, setAiData]     = useState(null);
   const [loading, setLoading]   = useState(false);
+  const [loadingStep, setLoadingStep] = useState(0); // 0=idle, 1-5=active step
   const [genError, setGenError] = useState("");
   const [ctxOpen, setCtxOpen]   = useState(true);
   const [newText, setNewText]   = useState({ strengths: "", weaknesses: "", opportunities: "", threats: "" });
@@ -157,7 +210,6 @@ export default function SWOTApp() {
   const [twError, setTwError]   = useState("");
   const [toast, setToast]       = useState("");
 
-  // Persist to localStorage
   useEffect(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
@@ -173,9 +225,7 @@ export default function SWOTApp() {
   }, []);
 
   const save = (overrides = {}) => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ profile, items, strategies, aiData, step, ...overrides }));
-    } catch(e) {}
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ profile, items, strategies, aiData, step, ...overrides })); } catch(e) {}
   };
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2800); };
@@ -185,121 +235,75 @@ export default function SWOTApp() {
     const v = (newText[cat] || "").trim();
     if (!v) return;
     const updated = { ...items, [cat]: [...items[cat], v] };
-    setItems(updated);
-    setNewText(p => ({ ...p, [cat]: "" }));
-    save({ items: updated });
+    setItems(updated); setNewText(p => ({ ...p, [cat]: "" })); save({ items: updated });
   };
-
   const removeItem = (cat, idx) => {
     const updated = { ...items, [cat]: items[cat].filter((_, i) => i !== idx) };
-    setItems(updated);
-    save({ items: updated });
+    setItems(updated); save({ items: updated });
   };
-
   const acceptSug = (cat, idx) => {
     const item = aiData?.[cat]?.[idx]?.item;
     if (!item || items[cat].includes(item)) return;
     const updated = { ...items, [cat]: [...items[cat], item] };
-    setItems(updated);
-    save({ items: updated });
+    setItems(updated); save({ items: updated });
   };
 
-  // ── Generate full SWOT analysis ──
+  // ── Sequentielle Calls, einer nach dem anderen ───────────────────────────────
   const startAnalysis = async () => {
     if (!profile.name || !profile.industry || !profile.product) {
       showToast("Bitte Name, Branche und Produkt ausfüllen"); return;
     }
     setGenError(""); setLoading(true);
 
-    const prompt = `Du bist ein erfahrener Senior-Unternehmensberater mit tiefem Branchenwissen.
-
-Analysiere:
-- Unternehmen: ${profile.name}
-- Branche: ${profile.industry}
-- Produkt/Service: ${profile.product}
-- Bekannte Konkurrenten: ${profile.competitors || "nicht angegeben – identifiziere typische Wettbewerber"}
-- Grösse: ${profile.size}
-- Analysebereich: ${profile.scope}
-- Ziel: ${profile.goal}
-
-Erstelle eine fundierte Branchenanalyse und SWOT-Vorschläge basierend auf echtem Marktwissen.
-Berücksichtige: Marktgrösse, Wettbewerbslandschaft, Kundenbedürfnisse, regulatorische Anforderungen (Schweizer Kontext wo relevant), Technologietrends.
-
-Antworte NUR mit validem JSON (kein Markdown, kein Text davor oder danach):
-{
-  "context": {
-    "market": "3 Sätze: Marktgrösse, Wachstum, wichtigste Trends",
-    "competitors": "Wettbewerbertypen, Marktkonzentration, Differenzierungsmerkmale",
-    "customers": "Kundensegmente, Entscheidungsträger, wichtigste Kaufkriterien",
-    "regulations": "Wichtigste regulatorische Anforderungen und Compliance-Themen"
-  },
-  "strengths":     [{"item":"Stärke 5-8 Wörter","reason":"Begründung mit Marktbezug"},{"item":"...","reason":"..."},{"item":"...","reason":"..."},{"item":"...","reason":"..."},{"item":"...","reason":"..."},{"item":"...","reason":"..."}],
-  "weaknesses":    [{"item":"Schwäche 5-8 Wörter","reason":"Begründung"},{"item":"...","reason":"..."},{"item":"...","reason":"..."},{"item":"...","reason":"..."},{"item":"...","reason":"..."},{"item":"...","reason":"..."}],
-  "opportunities": [{"item":"Chance 5-8 Wörter","reason":"Begründung"},{"item":"...","reason":"..."},{"item":"...","reason":"..."},{"item":"...","reason":"..."},{"item":"...","reason":"..."},{"item":"...","reason":"..."}],
-  "threats":       [{"item":"Risiko 5-8 Wörter","reason":"Begründung"},{"item":"...","reason":"..."},{"item":"...","reason":"..."},{"item":"...","reason":"..."},{"item":"...","reason":"..."},{"item":"...","reason":"..."}]
-}
-Sprache: Deutsch, Schweizer Stil (kein ß). Spezifisch, praxisnah, branchenrelevant.`;
-
     try {
-      const txt = await callClaude(prompt, 2800);
-      const match = txt.match(/\{[\s\S]*\}/);
-      if (match) {
-        const parsed = JSON.parse(match[0]);
-        setAiData(parsed);
-        save({ aiData: parsed, step: 1 });
-        setStep(1);
-      } else {
-        setGenError("Unerwartetes Antwortformat. Bitte nochmals versuchen.");
-      }
+      setLoadingStep(1);
+      const ctx = await fetchContext(profile);
+
+      setLoadingStep(2);
+      const strengths = await fetchCategory("strengths", profile);
+
+      setLoadingStep(3);
+      const weaknesses = await fetchCategory("weaknesses", profile);
+
+      setLoadingStep(4);
+      const opportunities = await fetchCategory("opportunities", profile);
+
+      setLoadingStep(5);
+      const threats = await fetchCategory("threats", profile);
+
+      const parsed = { context: ctx, strengths, weaknesses, opportunities, threats };
+      setAiData(parsed);
+      save({ aiData: parsed, step: 1 });
+      setStep(1);
     } catch(e) {
       setGenError(e.message || String(e));
     }
     setLoading(false);
+    setLoadingStep(0);
   };
 
-  // ── Generate TOWS strategies ──
+  // ── TOWS generation ──────────────────────────────────────────────────────────
   const generateTOWS = async () => {
     setTwLoad(true); setTwText(""); setTwError("");
-    const prompt = `Du bist Senior-Strategieberater. Erstelle konkrete TOWS-Strategien auf Deutsch (kein ß).
-Unternehmen: ${profile.name}, Branche: ${profile.industry}, Leistung: ${profile.product}
+    const prompt = `Du bist Senior-Strategieberater. TOWS-Strategien auf Deutsch (kein ß).
+${profile.name} | ${profile.industry} | ${profile.product}
 Stärken: ${items.strengths.join(" | ") || "–"}
 Schwächen: ${items.weaknesses.join(" | ") || "–"}
 Chancen: ${items.opportunities.join(" | ") || "–"}
 Risiken: ${items.threats.join(" | ") || "–"}
 
-## SO – Ausbauen (Stärken + Chancen)
-3 priorisierte, konkrete Massnahmen.
-## WO – Aufholen (Schwächen + Chancen)
-3 Massnahmen.
-## ST – Absichern (Stärken + Risiken)
-3 Massnahmen.
-## WT – Vermeiden (Schwächen + Risiken)
-3 Massnahmen.`;
+## SO – Ausbauen (Stärken + Chancen): 3 konkrete Massnahmen.
+## WO – Aufholen (Schwächen + Chancen): 3 Massnahmen.
+## ST – Absichern (Stärken + Risiken): 3 Massnahmen.
+## WT – Vermeiden (Schwächen + Risiken): 3 Massnahmen.`;
     try {
-      const txt = await callClaude(prompt, 1000);
+      const txt = await callClaude(prompt, 900, "claude-sonnet-4-6");
       setTwText(txt);
-    } catch(e) {
-      setTwError(e.message || String(e));
-    }
+    } catch(e) { setTwError(e.message || String(e)); }
     setTwLoad(false);
   };
 
-  // ─── DOCX Export (Word) ───────────────────────────────────────────────────
-  // Requires: npm install docx file-saver
-  // Import at top: import { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, HeadingLevel } from "docx";
-  // import { saveAs } from "file-saver";
-  const exportWord = () => {
-    showToast("Word-Export: npm install docx file-saver, dann exportWord() implementieren");
-    // Beispiel-Implementation:
-    // const doc = new Document({ sections: [{ children: [
-    //   new Paragraph({ text: `SWOT-Analyse: ${profile.name}`, heading: HeadingLevel.TITLE }),
-    //   ...
-    // ]}]});
-    // Packer.toBlob(doc).then(blob => saveAs(blob, `SWOT_${profile.name}.docx`));
-  };
-
-  // ─── Render ───────────────────────────────────────────────────────────────
-
+  // ─── Render ──────────────────────────────────────────────────────────────────
   const stepId = STEPS[step]?.id;
   const currentCat = CAT_ORDER.includes(stepId) ? stepId : null;
 
@@ -309,7 +313,6 @@ Risiken: ${items.threats.join(" | ") || "–"}
         <title>SWOT-Analyse Builder{profile.name ? ` – ${profile.name}` : ""}</title>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </Head>
-
       <div style={S.page}>
         {toast && <div style={S.toast}>{toast}</div>}
 
@@ -323,13 +326,11 @@ Risiken: ${items.threats.join(" | ") || "–"}
             <button onClick={() => { save(); showToast("Gespeichert"); }} style={{ background: "rgba(255,255,255,0.1)", border: "0.5px solid rgba(255,255,255,0.2)", color: "white", padding: "5px 12px", borderRadius: 6, cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>
               💾 Speichern
             </button>
-            <div style={{ fontSize: 11, color: "#93c5fd", padding: "3px 10px", background: "rgba(147,197,253,0.1)", borderRadius: 20, border: "0.5px solid rgba(147,197,253,0.3)" }}>
-              KI-gestützt
-            </div>
+            <div style={{ fontSize: 11, color: "#93c5fd", padding: "3px 10px", background: "rgba(147,197,253,0.1)", borderRadius: 20, border: "0.5px solid rgba(147,197,253,0.3)" }}>KI-gestützt</div>
           </div>
         </div>
 
-        {/* Step navigation */}
+        {/* Step nav */}
         <div style={S.snav}>
           {STEPS.map((s, i) => (
             <button key={s.id} onClick={() => setStep(i)}
@@ -356,13 +357,13 @@ Risiken: ${items.threats.join(" | ") || "–"}
                   <Field label="Bekannte Hauptkonkurrenten (optional)" value={profile.competitors} onChange={v => upProfile("competitors", v)} placeholder="z.B. Deloitte, KPMG – oder leer lassen" hint="KI identifiziert weitere Wettbewerber automatisch" />
                   <div>
                     <label style={S.lbl}>Unternehmensgrösse</label>
-                    <select value={profile.size} onChange={e => upProfile("size", e.target.value)} style={{ ...S.input }}>
+                    <select value={profile.size} onChange={e => upProfile("size", e.target.value)} style={S.input}>
                       {["Einzelunternehmen / Freelancer", "Mikrounternehmen (2–9 MA)", "Kleinunternehmen (10–49 MA)", "KMU (50–249 MA)", "Grossunternehmen (250+ MA)"].map(o => <option key={o}>{o}</option>)}
                     </select>
                   </div>
                   <div>
                     <label style={S.lbl}>Analysebereich</label>
-                    <select value={profile.scope} onChange={e => upProfile("scope", e.target.value)} style={{ ...S.input }}>
+                    <select value={profile.scope} onChange={e => upProfile("scope", e.target.value)} style={S.input}>
                       {["Gesamtes Unternehmen", "Einzelnes Produkt / Service", "Einzelner Geschäftsbereich", "Markteintrittsstrategie", "Neues Geschäftsmodell"].map(o => <option key={o}>{o}</option>)}
                     </select>
                   </div>
@@ -383,18 +384,24 @@ Risiken: ${items.threats.join(" | ") || "–"}
             </div>
           )}
 
-          {/* ── Loading ── */}
+          {/* ── Loading mit Fortschritt ── */}
           {loading && (
             <div style={{ ...S.card, padding: 40, textAlign: "center" }}>
-              <div style={{ fontSize: 32, marginBottom: 14 }}>⚙️</div>
+              <div style={{ fontSize: 28, marginBottom: 14 }}>⚙️</div>
               <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>Analyse läuft</div>
-              <div style={{ fontSize: 13, color: "#64748b", marginBottom: 20 }}>Die KI analysiert Ihre Branche und erstellt SWOT-Vorschläge</div>
-              <div style={{ maxWidth: 300, margin: "0 auto", textAlign: "left" }}>
-                {[`Branchenanalyse: ${profile.industry}`, "Wettbewerb und Marktdynamik", "Kundenbedürfnisse und Kaufentscheide", "Regulatorische Rahmenbedingungen", "SWOT-Vorschläge werden generiert"].map((s, i) => (
-                  <div key={i} style={{ display: "flex", gap: 8, fontSize: 12, color: "#64748b", padding: "7px 12px", borderRadius: 6, background: "#f8fafc", marginBottom: 5 }}>
-                    <span style={{ color: "#2563eb" }}>○</span>{s}
-                  </div>
-                ))}
+              <div style={{ fontSize: 13, color: "#64748b", marginBottom: 24 }}>Schritt {loadingStep} von 5</div>
+              <div style={{ maxWidth: 320, margin: "0 auto", textAlign: "left" }}>
+                {["Markt & Branchenkontext", "Stärken analysieren", "Schwächen analysieren", "Chancen identifizieren", "Risiken bewerten"].map((lbl, i) => {
+                  const idx = i + 1;
+                  const done = loadingStep > idx;
+                  const active = loadingStep === idx;
+                  return (
+                    <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13, padding: "8px 12px", borderRadius: 8, marginBottom: 6, background: done ? "#f0fdf4" : active ? "#eff6ff" : "#f8fafc", border: `0.5px solid ${done ? "#bbf7d0" : active ? "#bfdbfe" : "#e2e8f0"}`, color: done ? "#15803d" : active ? "#1e40af" : "#94a3b8" }}>
+                      <span>{done ? "✓" : active ? "⏳" : "○"}</span>
+                      <span style={{ fontWeight: active ? 600 : 400 }}>{lbl}</span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -423,7 +430,7 @@ Risiken: ${items.threats.join(" | ") || "–"}
                       ✨ KI-Vorschläge <span style={{ fontSize: 10, color: "#94a3b8" }}>(klicken zum Übernehmen)</span>
                     </div>
                     {sugs.length === 0
-                      ? <p style={{ fontSize: 12, color: "#94a3b8" }}>Keine Vorschläge – Analyse nochmals starten.</p>
+                      ? <p style={{ fontSize: 12, color: "#94a3b8" }}>Keine Vorschläge verfügbar.</p>
                       : <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                           {sugs.map((sg, i) => (
                             <SugCard key={i} item={sg.item} reason={sg.reason} accepted={catItems.includes(sg.item)} onClick={() => acceptSug(cat, i)} />
@@ -514,8 +521,9 @@ Risiken: ${items.threats.join(" | ") || "–"}
                 ))}
               </div>
               {twLoading && <div style={{ background: "#0f172a", borderRadius: 12, padding: 20, textAlign: "center", color: "#64748b", fontSize: 12, marginBottom: 12 }}>Analyse läuft...</div>}
-              {twError && !twLoading && <div style={{ ...S.errBl }}><p style={{ fontSize: 12, color: "#dc2626", margin: 0 }}>Fehler: {twError}</p><button onClick={generateTOWS} style={{ marginTop: 6, fontSize: 11, padding: "3px 8px", border: "0.5px solid #fecaca", borderRadius: 4, cursor: "pointer", background: "white", fontFamily: "inherit" }}>Retry</button></div>}
+              {twError && !twLoading && <div style={S.errBl}><p style={{ fontSize: 12, color: "#dc2626", margin: 0 }}>Fehler: {twError}</p><button onClick={generateTOWS} style={{ marginTop: 6, fontSize: 11, padding: "3px 8px", border: "0.5px solid #fecaca", borderRadius: 4, cursor: "pointer", background: "white", fontFamily: "inherit" }}>Retry</button></div>}
               {twText && !twLoading && <div style={{ background: "#0f172a", borderRadius: 12, padding: 16, color: "#cbd5e1", fontSize: 12, lineHeight: 1.75, whiteSpace: "pre-wrap", maxHeight: 300, overflow: "auto", marginBottom: 12 }}>{twText}</div>}
+              {!twLoading && !twText && !twError && <div style={{ background: "#f8fafc", border: "0.5px solid #e2e8f0", borderRadius: 8, padding: 12, fontSize: 12, color: "#94a3b8", textAlign: "center", marginBottom: 12 }}>KI-Strategien über den Button generieren oder Felder manuell ausfüllen.</div>}
               <NavRow onBack={() => setStep(5)} onNext={() => { save(); setStep(7); }} nextLabel="Zum Download →" />
             </div>
           )}
@@ -536,16 +544,12 @@ Risiken: ${items.threats.join(" | ") || "–"}
                 <div style={{ fontSize: 32, marginBottom: 10 }}>📄</div>
                 <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>Word-Dokument (.docx)</div>
                 <div style={{ fontSize: 12, color: "#64748b", marginBottom: 18, lineHeight: 1.6 }}>Enthält: SWOT-Matrix · KI-Branchenanalyse · TOWS-Strategien · Unternehmensangaben · Datum</div>
-                <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
-                  <button onClick={exportWord} style={S.btnPri}>📥 Als Word (.docx) herunterladen</button>
-                </div>
+                <button onClick={() => showToast("Word-Export: npm install docx file-saver – nächster Schritt")} style={S.btnPri}>📥 Als Word (.docx) herunterladen</button>
               </div>
               <div style={S.infoBl}>
-                <p style={{ fontSize: 12, color: "#1e40af", margin: 0 }}>
-                  <strong>Word-Export:</strong> <code>npm install docx file-saver</code> einbinden, dann <code>exportWord()</code> Funktion implementieren (siehe Kommentar im Code).
-                </p>
+                <p style={{ fontSize: 12, color: "#1e40af", margin: 0 }}><strong>Word-Export:</strong> Nächster Schritt – <code>npm install docx file-saver</code> + exportWord() Funktion.</p>
               </div>
-              <div style={{ ...S.navr, justifyContent: "space-between" }}>
+              <div style={{ ...S.navr }}>
                 <button onClick={() => setStep(6)} style={S.btnOut}>← Zurück</button>
                 <button onClick={() => { if (window.confirm("Neue Analyse starten?")) { setItems({ strengths: [], weaknesses: [], opportunities: [], threats: [] }); setStrats({ SO: "", WO: "", ST: "", WT: "" }); setAiData(null); setTwText(""); save({ step: 0 }); setStep(0); } }}
                   style={{ ...S.btnOut, color: "#16a34a", borderColor: "#bbf7d0" }}>+ Neue Analyse</button>
