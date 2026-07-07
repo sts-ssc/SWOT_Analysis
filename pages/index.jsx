@@ -83,17 +83,18 @@ function parseList(txt) {
   return result;
 }
 
-// Call 1: Marktkontext
+// Call 1: Marktkontext mit Land + explizite Regulierungen
 async function fetchContext(p) {
+  const land = p.country || "Schweiz";
   const txt = await callClaude(
-`Branchenanalyse fuer ${p.name} (${p.industry}, ${p.size}).
-Format exakt:
-MARKET: 1 Satz
-COMPETITION: 1 Satz
-CUSTOMERS: 1 Satz
-REGULATIONS: 1 Satz
-Deutsch, kein ss statt ss.`, 200);
-  const get = (k) => { const m = txt.match(new RegExp(k + "[:\\s]+(.+?)(?=\\n|$)")); return m ? m[1].trim() : ""; };
+`Branchenanalyse fuer ${p.name} (${p.industry}, ${p.size}, ${land}).
+Format exakt, keine anderen Texte:
+MARKET: 1 Satz zum Markt in ${land}
+COMPETITION: 1 Satz Wettbewerbertypen in ${land}
+CUSTOMERS: 1 Satz Kundensegmente und Kaufkriterien
+REGULATIONS: Relevante Regulierungen und Standards fuer ${p.industry} in ${land} (z.B. ISO 27001, FINMA RS 2023/1, NIS-2, DORA, CRA, DSGVO, KRITIS, SOC2, je nach Branche)
+Deutsch, kein ss.`, 300);
+  const get = (k) => { const m = txt.match(new RegExp(k + "[:\\s]+(.+?)(?=\\n[A-Z]+:|$)", "s")); return m ? m[1].replace(/\n/g, " ").trim() : ""; };
   return { market: get("MARKET"), competitors: get("COMPETITION"), customers: get("CUSTOMERS"), regulations: get("REGULATIONS") };
 }
 
@@ -196,7 +197,7 @@ function SugCard({ item, reason, accepted, onClick }) {
 
 export default function SWOTApp() {
   const [step, setStep]         = useState(0);
-  const [profile, setProfile]   = useState({ name: "", industry: "", product: "", competitors: "", size: "KMU (50–249 MA)", scope: "Gesamtes Unternehmen", goal: "" });
+  const [profile, setProfile]   = useState({ name: "", industry: "", product: "", competitors: "", size: "KMU (50–249 MA)", scope: "Gesamtes Unternehmen", goal: "", country: "Schweiz" });
   const [items, setItems]       = useState({ strengths: [], weaknesses: [], opportunities: [], threats: [] });
   const [strategies, setStrats] = useState({ SO: "", WO: "", ST: "", WT: "" });
   const [aiData, setAiData]     = useState(null);
@@ -282,23 +283,48 @@ export default function SWOTApp() {
     setLoadingStep(0);
   };
 
-  // ── TOWS generation ──────────────────────────────────────────────────────────
+  // ── TOWS: KI füllt Boxen direkt aus ─────────────────────────────────────────
   const generateTOWS = async () => {
     setTwLoad(true); setTwText(""); setTwError("");
-    const prompt = `Du bist Senior-Strategieberater. TOWS-Strategien auf Deutsch (kein ß).
-${profile.name} | ${profile.industry} | ${profile.product}
-Stärken: ${items.strengths.join(" | ") || "–"}
-Schwächen: ${items.weaknesses.join(" | ") || "–"}
+    const prompt =
+`Senior-Strategieberater. TOWS-Strategien fuer ${profile.name} (${profile.industry}, ${profile.country || "Schweiz"}).
+Staerken: ${items.strengths.join(" | ") || "–"}
+Schwaechen: ${items.weaknesses.join(" | ") || "–"}
 Chancen: ${items.opportunities.join(" | ") || "–"}
 Risiken: ${items.threats.join(" | ") || "–"}
 
-## SO – Ausbauen (Stärken + Chancen): 3 konkrete Massnahmen.
-## WO – Aufholen (Schwächen + Chancen): 3 Massnahmen.
-## ST – Absichern (Stärken + Risiken): 3 Massnahmen.
-## WT – Vermeiden (Schwächen + Risiken): 3 Massnahmen.`;
+Antworte EXAKT in diesem Format (kein anderer Text):
+SO:
+- Massnahme 1
+- Massnahme 2
+- Massnahme 3
+
+WO:
+- Massnahme 1
+- Massnahme 2
+- Massnahme 3
+
+ST:
+- Massnahme 1
+- Massnahme 2
+- Massnahme 3
+
+WT:
+- Massnahme 1
+- Massnahme 2
+- Massnahme 3
+Deutsch, kein ss, konkret und umsetzbar.`;
     try {
-      const txt = await callClaude(prompt, 900, "claude-sonnet-4-6");
-      setTwText(txt);
+      const txt = await callClaude(prompt, 600, "claude-sonnet-4-6");
+      // Parse und direkt in Boxen eintragen
+      const getSection = (key) => {
+        const m = txt.match(new RegExp(key + "[:\\s]*\\n([\\s\\S]*?)(?=\\n[A-Z]{2}:|$)"));
+        if (!m) return "";
+        return m[1].trim().split("\n").map(l => l.replace(/^[-•*]\s*/, "").trim()).filter(Boolean).join("\n");
+      };
+      const parsed = { SO: getSection("SO"), WO: getSection("WO"), ST: getSection("ST"), WT: getSection("WT") };
+      setStrats(parsed);
+      setTwText("✓ Strategien wurden in die Boxen eingetragen. Sie können diese bearbeiten.");
     } catch(e) { setTwError(e.message || String(e)); }
     setTwLoad(false);
   };
@@ -355,6 +381,13 @@ Risiken: ${items.threats.join(" | ") || "–"}
                   <Field label="Branche / Sektor *" value={profile.industry} onChange={v => upProfile("industry", v)} placeholder="z.B. IT-Security Beratung, Detailhandel..." />
                   <Field label="Hauptprodukt / Hauptleistung *" value={profile.product} onChange={v => upProfile("product", v)} placeholder="z.B. FINMA-Compliance Audits, Cloud Security..." hint="Je spezifischer, desto präzisere Vorschläge" />
                   <Field label="Bekannte Hauptkonkurrenten (optional)" value={profile.competitors} onChange={v => upProfile("competitors", v)} placeholder="z.B. Deloitte, KPMG – oder leer lassen" hint="KI identifiziert weitere Wettbewerber automatisch" />
+                  <div>
+                    <label style={S.lbl}>Land / Markt *</label>
+                    <select value={profile.country} onChange={e => upProfile("country", e.target.value)} style={S.input}>
+                      {["Schweiz", "Deutschland", "Österreich", "EU (allgemein)", "USA", "International"].map(o => <option key={o}>{o}</option>)}
+                    </select>
+                    <p style={S.hint}>Bestimmt Regulierungen, Markt und Wettbewerb</p>
+                  </div>
                   <div>
                     <label style={S.lbl}>Unternehmensgrösse</label>
                     <select value={profile.size} onChange={e => upProfile("size", e.target.value)} style={S.input}>
