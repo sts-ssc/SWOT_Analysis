@@ -1,11 +1,12 @@
 // pages/api/claude.js
-// Edge Runtime: 30 Sek. Timeout (Hobby Plan) statt 10 Sek. Serverless
+// Stream-Proxy: Antwort wird direkt gepipet, kein Buffering
+// Edge Function "returned" nach ~1 Sek. (Headers), Daten streamen danach
 
 export const config = { runtime: 'edge' };
 
 export default async function handler(req) {
   if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+    return new Response('{"error":"Method not allowed"}', {
       status: 405,
       headers: { 'Content-Type': 'application/json' },
     });
@@ -14,7 +15,7 @@ export default async function handler(req) {
   try {
     const body = await req.json();
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
+    const upstream = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -24,16 +25,17 @@ export default async function handler(req) {
       body: JSON.stringify(body),
     });
 
-    const data = await response.json();
-
-    return new Response(JSON.stringify(data), {
-      status: response.status,
+    // Direkt pipen – kein await response.json(), kein Buffering
+    // Vercel-Funktion returned sofort nach Headers, Daten streamen weiter
+    return new Response(upstream.body, {
+      status: upstream.status,
       headers: { 'Content-Type': 'application/json' },
     });
+
   } catch (error) {
-    return new Response(
-      JSON.stringify({ error: error.message || 'Unknown error' }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
-    );
+    return new Response(JSON.stringify({ error: error.message || 'Unknown error' }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
 }
