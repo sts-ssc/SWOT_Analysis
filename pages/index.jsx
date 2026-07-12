@@ -76,25 +76,28 @@ async function fetchContext(p, siteText) {
 
   // Call 1: Markt, Wettbewerb, Konkurrenten, Kunden
   const txt1 = await callClaude(
-`Senior-Unternehmensberater, Fokus Schweizer Markt.
-Analysiere: ${p.name} (${p.industry}, ${p.size}, ${land})${site}
+`Senior-Unternehmensberater, Fokus ${land}.
+Unternehmen: ${p.name}
+Branche: ${p.industry}
+Produkt/Service: ${p.product}
+Groesse: ${p.size}${site}
 
-Antworte EXAKT in diesem Format:
-MARKET: Marktgroesse CHF, Wachstumsrate, Haupttreiber in ${land} (3 Saetze)
-COMPETITION: Marktstruktur, Wettbewerbertypen, Preisdruck, Differenzierung (3 Saetze)
-COMPETITORS: Die 6 wichtigsten direkten Konkurrenten von ${p.name} im Markt ${land} – basierend auf Branche und Leistungsangebot, nur echte Firmennamen
-CUSTOMERS: Kundensegmente, Entscheidungstraeger (CISO/CIO/CTO), Kaufkriterien (2 Saetze)
-Deutsch, kein ss.`, 800, "claude-sonnet-4-6");
+Antworte EXAKT in diesem Format (alle Felder vollstaendig):
+MARKET: Marktgroesse CHF, Wachstumsrate, wichtigste Nachfragetreiber in ${land} (3 Saetze)
+COMPETITION: Marktstruktur (fragmentiert/konsolidiert), Wettbewerbertypen, Preisdruck, Differenzierungsmerkmale (3 Saetze)
+COMPETITORS: Die 6 wichtigsten direkten Konkurrenten von ${p.name} fuer das Angebot "${p.product}" in ${land} – nur echte, spezifische Firmennamen die genau diese Leistungen anbieten
+CUSTOMERS: Typische Kundensegmente, Entscheidungstraeger (Titel), wichtigste Kaufkriterien (2-3 Saetze)
+Deutsch, Schweizer Stil (kein ss).`, 800, "claude-sonnet-4-6");
 
-  // Call 2: Regulierungen + Trends
+  // Call 2: TRENDS zuerst (damit kein Truncation), dann REGULATIONS
   const txt2 = await callClaude(
-`Senior-Compliance-Berater, Fokus ${land}.
-Unternehmen: ${p.name} (${p.industry}, ${p.size})
+`Senior-Berater, Fokus ${land}.
+Branche: ${p.industry} | Unternehmen: ${p.name}
 
 Antworte EXAKT in diesem Format:
-REGULATIONS: Identifiziere alle tatsaechlich relevanten Regulierungen und Standards fuer ${p.industry} in ${land} – nur was wirklich zutrifft, mit kurzer Erklaerung der Relevanz. Keine generischen Listen.
-TRENDS: Wichtigste Technologie- und Markttrends fuer ${p.industry} in ${land} in den naechsten 2-3 Jahren (3 Saetze)
-Deutsch, kein ss.`, 800, "claude-sonnet-4-6");
+TRENDS: Die 4 wichtigsten Technologie- und Markttrends fuer ${p.industry} in ${land} in den naechsten 2-3 Jahren – konkret und branchenspezifisch (3-4 Saetze)
+REGULATIONS: Alle fuer ${p.industry} in ${land} tatsaechlich relevanten Regulierungen und Standards – identifiziere selbst was zutrifft, mit kurzer Erklaerung der Relevanz pro Standard (keine generische Liste, nur was fuer diese Branche und diesen Markt gilt)
+Deutsch, Schweizer Stil (kein ss).`, 900, "claude-sonnet-4-6");
 
   return {
     market:          getField(txt1, "MARKET"),
