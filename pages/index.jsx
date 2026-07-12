@@ -57,30 +57,52 @@ function parseList(txt) {
 
 async function fetchContext(p, siteText) {
   const land = p.country || "Schweiz";
-  const site = siteText ? `\nWebsite-Inhalt (Auszug):\n${siteText.slice(0,1000)}` : (p.url ? `\nWebsite: ${p.url}` : "");
+  const site = siteText ? `\nWebsite-Inhalt (Auszug):\n${siteText.slice(0, 800)}` : (p.url ? `\nWebsite: ${p.url}` : "");
   const txt = await callClaude(
-`Tiefe Branchenanalyse fuer ${p.name} (${p.industry}, ${p.size}, ${land}).${site}
+`Du bist ein erfahrener Senior-Unternehmensberater mit tiefem Wissen ueber den Schweizer Markt.
 
-Format exakt (kein anderer Text):
-MARKET: 2-3 Saetze zu Markt in ${land}: Groesse, Wachstum, Trends
-COMPETITION: 2-3 Saetze zu Wettbewerb, Marktdynamik, Differenzierung
-COMPETITORS: Kommagetrennte Liste der 5 wichtigsten Konkurrenten von ${p.name} in ${land}
-CUSTOMERS: Kundensegmente, Entscheidungstraeger, Kaufkriterien (2 Saetze)
-REGULATIONS: Alle relevanten Regulierungen fuer ${p.industry} in ${land}: ISO 27001, FINMA RS 2023/1, NIS-2, DORA, CRA, DSGVO, KRITIS, SOC2 usw.
-TRENDS: Wichtigste Tech- und Markttrends (2 Saetze)
-Deutsch, kein ss-Fehler.`, 600, "claude-sonnet-4-6");
+Analysiere: ${p.name} (${p.industry}, ${p.size}, ${land})${site}
 
-  const getLine = (k) => {
-    const m = txt.match(new RegExp(k + "[:\\s]+(.+?)(?=\\n[A-Z]+[:\\s]|$)", "s"));
-    return m ? m[1].replace(/\n/g," ").trim() : "";
+Erstelle eine fundierte Branchenanalyse. Antworte EXAKT in diesem Format (ALLE Felder vollstaendig ausfuellen):
+
+MARKET: Marktgroesse in CHF, Wachstumsrate, Haupttreiber und -trends in ${land} (3-4 Saetze)
+
+COMPETITION: Marktstruktur, Wettbewerbertypen, Differenzierung, Preisdruck (3-4 Saetze)
+
+COMPETITORS: Kommagetrennte Liste der 6 direkten Konkurrenten von ${p.name} in ${land} - NUR spezifische Firmennahmen (z.B. Infoguard, Zuehlke, Ergon, Adcubum, ti&m, Appway, SoftwareOne, Swisscom IT Services, Siemens Schweiz, ABB Schweiz etc.)
+
+CUSTOMERS: Hauptkundensegmente, typische Entscheidungstraeger (CISOs, CIOs, CTOs), Kaufkriterien und Budgets (2-3 Saetze)
+
+REGULATIONS: Vollstaendige Liste aller relevanten Regulierungen und Standards fuer ${p.industry} in ${land} mit kurzer Erklaerung: ISO 27001 (ISMS), ISO 22301 (BCM), NIST CSF (Cybersecurity Framework), NIST SP 800-53, NIS-2 (EU-Richtlinie 2022/2555), DORA (EU 2022/2554, Digital Operational Resilience Act), CRA (Cyber Resilience Act), KRITIS-Dachgesetz (D), FINMA RS 2023/1 (CH, ICT und Cyberrisiken), FINMA RS 2008/21 (CH, operationelle Risiken), DSG (Schweizer Datenschutzgesetz), DSGVO/GDPR, PCI-DSS, SOC 2, IEC 62443 (OT-Sicherheit), BSI IT-Grundschutz - je nach Relevanz fuer diese Branche und diesen Markt
+
+TRENDS: Wichtigste Technologie- und Markttrends: KI-Integration, Zero Trust, Cloud Security, Quantencomputing-Bedrohung, Regulierungsdruck, Automatisierung, Nearshoring (3-4 Saetze)
+
+Deutsch, Schweizer Stil (kein ss).`, 1800, "claude-sonnet-4-6");
+
+  // Robustes Parsing: indexOf-basiert (zuverlässiger als Regex für lange Texte)
+  const FIELDS = ["MARKET","COMPETITION","COMPETITORS","CUSTOMERS","REGULATIONS","TRENDS"];
+  const getField = (key) => {
+    const marker = key + ":";
+    const idx = txt.indexOf(marker);
+    if (idx === -1) return "";
+    const afterKey = txt.slice(idx + marker.length).trim();
+    // Find next field marker
+    let end = afterKey.length;
+    for (const f of FIELDS) {
+      if (f === key) continue;
+      const ni = afterKey.indexOf("\n" + f + ":");
+      if (ni !== -1 && ni < end) end = ni;
+    }
+    return afterKey.slice(0, end).replace(/\n+/g, " ").trim();
   };
+
   return {
-    market:          getLine("MARKET"),
-    competitors:     getLine("COMPETITION"),
-    competitorsList: getLine("COMPETITORS"),
-    customers:       getLine("CUSTOMERS"),
-    regulations:     getLine("REGULATIONS"),
-    trends:          getLine("TRENDS"),
+    market:          getField("MARKET"),
+    competitors:     getField("COMPETITION"),
+    competitorsList: getField("COMPETITORS"),
+    customers:       getField("CUSTOMERS"),
+    regulations:     getField("REGULATIONS"),
+    trends:          getField("TRENDS"),
   };
 }
 
