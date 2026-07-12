@@ -260,45 +260,57 @@ Deutsch, kein ss.`,600,"claude-sonnet-4-6");
     setTwLoad(false);
   };
 
-  const exportWord = async () => {
+  const exportWord = () => {
     showToast("Word-Dokument wird erstellt...");
-    try {
-      const {Document,Packer,Paragraph,TextRun,HeadingLevel,AlignmentType}=await import("docx");
-      const {saveAs}=await import("file-saver");
-      const date=new Date().toLocaleDateString("de-CH");
-      const h1=(t)=>new Paragraph({text:t,heading:HeadingLevel.HEADING_1,spacing:{before:300,after:120}});
-      const h2=(t)=>new Paragraph({text:t,heading:HeadingLevel.HEADING_2,spacing:{before:200,after:80}});
-      const lbl=(l,v)=>new Paragraph({children:[new TextRun({text:l+": ",bold:true}),new TextRun(v||"–")],spacing:{after:80}});
-      const blt=(t)=>new Paragraph({children:[new TextRun("• "+t)],indent:{left:360},spacing:{after:60}});
-      const emp=()=>new Paragraph({text:""});
-      const doc=new Document({sections:[{children:[
-        new Paragraph({children:[new TextRun({text:`SWOT-Analyse: ${profile.name}`,bold:true,size:36})],alignment:AlignmentType.CENTER,spacing:{after:120}}),
-        new Paragraph({children:[new TextRun({text:`${date} | ${profile.country||"Schweiz"}`,color:"888888"})],alignment:AlignmentType.CENTER,spacing:{after:400}}),
-        h1("1. Unternehmensprofil"),
-        lbl("Unternehmen",profile.name), lbl("Branche",profile.industry),
-        lbl("Land",profile.country), lbl("Website",profile.url||"–"),
-        lbl("Produkt",profile.product), lbl("Grösse",profile.size), lbl("Ziel",profile.goal), emp(),
-        ...(aiData?.context?[
-          h1("2. KI-Branchenanalyse"),
-          lbl("Markt",aiData.context.market), lbl("Wettbewerb",aiData.context.competitors),
-          lbl("Konkurrenten",aiData.context.competitorsList), lbl("Kunden",aiData.context.customers),
-          lbl("Regulierung",aiData.context.regulations), lbl("Trends",aiData.context.trends), emp(),
-        ]:[]),
-        h1("3. SWOT-Analyse"),
-        ...["Stärken","Schwächen","Chancen","Risiken"].flatMap((t,i)=>{
-          const d=[items.strengths,items.weaknesses,items.opportunities,items.threats][i];
-          return [h2(t),...(d.length?d.map(blt):[new Paragraph({text:"Keine Punkte",spacing:{after:60}})]),emp()];
-        }),
-        h1("4. TOWS-Strategien"),
-        ...["SO – Ausbauen","WO – Aufholen","ST – Absichern","WT – Vermeiden"].flatMap((t,i)=>{
-          const c=strategies[["SO","WO","ST","WT"][i]]||"";
-          return [h2(t),...(c?c.split("\n").filter(Boolean).map(blt):[new Paragraph({text:"Keine Strategien",spacing:{after:60}})]),emp()];
-        }),
-      ]}]});
-      const blob=await Packer.toBlob(doc);
-      saveAs(blob,`SWOT_${profile.name}_${date.replace(/\./g,"-")}.docx`);
-      showToast("✓ Word-Dokument heruntergeladen!");
-    } catch(e){ showToast("Fehler: "+(e.message||String(e))); }
+    const date = new Date().toLocaleDateString("de-CH");
+    const ctx = aiData?.context;
+    const html = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+<head><meta charset='utf-8'><title>SWOT-Analyse ${profile.name}</title>
+<style>
+body{font-family:Calibri,Arial,sans-serif;font-size:11pt;margin:2cm}
+h1{color:#0f172a;font-size:18pt}h2{font-size:13pt;margin-top:16pt;border-bottom:1px solid #e2e8f0;padding-bottom:4pt}
+.meta{color:#64748b;font-size:10pt}.lbl{font-weight:bold}
+table{width:100%;border-collapse:collapse;margin:12pt 0}
+td{border:1px solid #d1d5db;padding:8pt;vertical-align:top;width:50%}
+.gr{background:#f0fdf4}.re{background:#fef2f2}.bl{background:#eff6ff}.am{background:#fffbeb}
+ul{margin:4pt 0;padding-left:16pt}li{margin-bottom:3pt}
+.sb{background:#f8fafc;border:1px solid #e2e8f0;padding:8pt;margin-bottom:8pt}
+</style></head><body>
+<h1>SWOT-Analyse: ${profile.name}</h1>
+<p class="meta">Erstellt am ${date} &nbsp;|&nbsp; ${profile.country||"Schweiz"} &nbsp;|&nbsp; ${profile.industry}</p><hr>
+<h2>1. Unternehmensprofil</h2>
+<p><span class="lbl">Unternehmen:</span> ${profile.name}</p>
+<p><span class="lbl">Branche:</span> ${profile.industry}</p>
+<p><span class="lbl">Land:</span> ${profile.country||"Schweiz"}</p>
+${profile.url?`<p><span class="lbl">Website:</span> ${profile.url}</p>`:""}
+<p><span class="lbl">Produkt:</span> ${profile.product}</p>
+<p><span class="lbl">Grösse:</span> ${profile.size}</p>
+<p><span class="lbl">Analyseziel:</span> ${profile.goal}</p>
+${ctx?`<h2>2. KI-Branchenanalyse</h2>
+${ctx.market?`<p><span class="lbl">Markt:</span> ${ctx.market}</p>`:""}
+${ctx.competitors?`<p><span class="lbl">Wettbewerb:</span> ${ctx.competitors}</p>`:""}
+${ctx.competitorsList?`<p><span class="lbl">Konkurrenten:</span> ${ctx.competitorsList}</p>`:""}
+${ctx.customers?`<p><span class="lbl">Kunden:</span> ${ctx.customers}</p>`:""}
+${ctx.regulations?`<p><span class="lbl">Regulierung:</span> ${ctx.regulations}</p>`:""}
+${ctx.trends?`<p><span class="lbl">Trends:</span> ${ctx.trends}</p>`:""}`:""} 
+<h2>3. SWOT-Matrix</h2>
+<table><tr>
+<td class="gr"><strong style="color:#15803d">Stärken (${items.strengths.length})</strong>${items.strengths.length?`<ul>${items.strengths.map(i=>`<li>${i}</li>`).join("")}</ul>`:"<p><em>–</em></p>"}</td>
+<td class="re"><strong style="color:#dc2626">Schwächen (${items.weaknesses.length})</strong>${items.weaknesses.length?`<ul>${items.weaknesses.map(i=>`<li>${i}</li>`).join("")}</ul>`:"<p><em>–</em></p>"}</td>
+</tr><tr>
+<td class="bl"><strong style="color:#1d4ed8">Chancen (${items.opportunities.length})</strong>${items.opportunities.length?`<ul>${items.opportunities.map(i=>`<li>${i}</li>`).join("")}</ul>`:"<p><em>–</em></p>"}</td>
+<td class="am"><strong style="color:#b45309">Risiken (${items.threats.length})</strong>${items.threats.length?`<ul>${items.threats.map(i=>`<li>${i}</li>`).join("")}</ul>`:"<p><em>–</em></p>"}</td>
+</tr></table>
+<h2>4. TOWS-Strategien</h2>
+${[["SO – Ausbauen","SO"],["WO – Aufholen","WO"],["ST – Absichern","ST"],["WT – Vermeiden","WT"]].map(([t,k])=>`<div class="sb"><strong>${t}</strong>${strategies[k]?`<ul>${strategies[k].split("\n").filter(Boolean).map(l=>`<li>${l}</li>`).join("")}</ul>`:"<p><em>–</em></p>"}</div>`).join("")}
+</body></html>`;
+    const blob = new Blob(["\ufeff", html], { type: "application/msword" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `SWOT_${profile.name}_${date.replace(/\./g,"-")}.doc`;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+    showToast("✓ Word-Dokument heruntergeladen!");
   };
 
   const stepId=STEPS[step]?.id;
