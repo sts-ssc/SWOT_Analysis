@@ -57,52 +57,52 @@ function parseList(txt) {
 
 async function fetchContext(p, siteText) {
   const land = p.country || "Schweiz";
-  const site = siteText ? `\nWebsite-Inhalt (Auszug):\n${siteText.slice(0, 800)}` : (p.url ? `\nWebsite: ${p.url}` : "");
-  const txt = await callClaude(
-`Du bist ein erfahrener Senior-Unternehmensberater mit tiefem Wissen ueber den Schweizer Markt.
-
-Analysiere: ${p.name} (${p.industry}, ${p.size}, ${land})${site}
-
-Erstelle eine fundierte Branchenanalyse. Antworte EXAKT in diesem Format (ALLE Felder vollstaendig ausfuellen):
-
-MARKET: Marktgroesse in CHF, Wachstumsrate, Haupttreiber und -trends in ${land} (3-4 Saetze)
-
-COMPETITION: Marktstruktur, Wettbewerbertypen, Differenzierung, Preisdruck (3-4 Saetze)
-
-COMPETITORS: Kommagetrennte Liste der 6 direkten Konkurrenten von ${p.name} in ${land} - NUR spezifische Firmennahmen (z.B. Infoguard, Zuehlke, Ergon, Adcubum, ti&m, Appway, SoftwareOne, Swisscom IT Services, Siemens Schweiz, ABB Schweiz etc.)
-
-CUSTOMERS: Hauptkundensegmente, typische Entscheidungstraeger (CISOs, CIOs, CTOs), Kaufkriterien und Budgets (2-3 Saetze)
-
-REGULATIONS: Vollstaendige Liste aller relevanten Regulierungen und Standards fuer ${p.industry} in ${land} mit kurzer Erklaerung: ISO 27001 (ISMS), ISO 22301 (BCM), NIST CSF (Cybersecurity Framework), NIST SP 800-53, NIS-2 (EU-Richtlinie 2022/2555), DORA (EU 2022/2554, Digital Operational Resilience Act), CRA (Cyber Resilience Act), KRITIS-Dachgesetz (D), FINMA RS 2023/1 (CH, ICT und Cyberrisiken), FINMA RS 2008/21 (CH, operationelle Risiken), DSG (Schweizer Datenschutzgesetz), DSGVO/GDPR, PCI-DSS, SOC 2, IEC 62443 (OT-Sicherheit), BSI IT-Grundschutz - je nach Relevanz fuer diese Branche und diesen Markt
-
-TRENDS: Wichtigste Technologie- und Markttrends: KI-Integration, Zero Trust, Cloud Security, Quantencomputing-Bedrohung, Regulierungsdruck, Automatisierung, Nearshoring (3-4 Saetze)
-
-Deutsch, Schweizer Stil (kein ss).`, 1800, "claude-sonnet-4-6");
-
-  // Robustes Parsing: indexOf-basiert (zuverlässiger als Regex für lange Texte)
+  const site = siteText ? `\nWebsite-Inhalt:\n${siteText.slice(0, 600)}` : (p.url ? `\nWebsite: ${p.url}` : "");
   const FIELDS = ["MARKET","COMPETITION","COMPETITORS","CUSTOMERS","REGULATIONS","TRENDS"];
-  const getField = (key) => {
+
+  const getField = (txt, key) => {
     const marker = key + ":";
     const idx = txt.indexOf(marker);
     if (idx === -1) return "";
-    const afterKey = txt.slice(idx + marker.length).trim();
-    // Find next field marker
-    let end = afterKey.length;
+    const after = txt.slice(idx + marker.length).trim();
+    let end = after.length;
     for (const f of FIELDS) {
       if (f === key) continue;
-      const ni = afterKey.indexOf("\n" + f + ":");
+      const ni = after.indexOf("\n" + f + ":");
       if (ni !== -1 && ni < end) end = ni;
     }
-    return afterKey.slice(0, end).replace(/\n+/g, " ").trim();
+    return after.slice(0, end).replace(/\n+/g, " ").trim();
   };
 
+  // Call 1: Markt, Wettbewerb, Konkurrenten, Kunden
+  const txt1 = await callClaude(
+`Senior-Unternehmensberater, Fokus Schweizer Markt.
+Analysiere: ${p.name} (${p.industry}, ${p.size}, ${land})${site}
+
+Antworte EXAKT in diesem Format:
+MARKET: Marktgroesse CHF, Wachstumsrate, Haupttreiber in ${land} (3 Saetze)
+COMPETITION: Marktstruktur, Wettbewerbertypen, Preisdruck, Differenzierung (3 Saetze)
+COMPETITORS: Die 6 wichtigsten direkten Konkurrenten von ${p.name} im Markt ${land} – basierend auf Branche und Leistungsangebot, nur echte Firmennamen
+CUSTOMERS: Kundensegmente, Entscheidungstraeger (CISO/CIO/CTO), Kaufkriterien (2 Saetze)
+Deutsch, kein ss.`, 800, "claude-sonnet-4-6");
+
+  // Call 2: Regulierungen + Trends
+  const txt2 = await callClaude(
+`Senior-Compliance-Berater, Fokus ${land}.
+Unternehmen: ${p.name} (${p.industry}, ${p.size})
+
+Antworte EXAKT in diesem Format:
+REGULATIONS: Identifiziere alle tatsaechlich relevanten Regulierungen und Standards fuer ${p.industry} in ${land} – nur was wirklich zutrifft, mit kurzer Erklaerung der Relevanz. Keine generischen Listen.
+TRENDS: Wichtigste Technologie- und Markttrends fuer ${p.industry} in ${land} in den naechsten 2-3 Jahren (3 Saetze)
+Deutsch, kein ss.`, 800, "claude-sonnet-4-6");
+
   return {
-    market:          getField("MARKET"),
-    competitors:     getField("COMPETITION"),
-    competitorsList: getField("COMPETITORS"),
-    customers:       getField("CUSTOMERS"),
-    regulations:     getField("REGULATIONS"),
-    trends:          getField("TRENDS"),
+    market:          getField(txt1, "MARKET"),
+    competitors:     getField(txt1, "COMPETITION"),
+    competitorsList: getField(txt1, "COMPETITORS"),
+    customers:       getField(txt1, "CUSTOMERS"),
+    regulations:     getField(txt2, "REGULATIONS"),
+    trends:          getField(txt2, "TRENDS"),
   };
 }
 
@@ -423,10 +423,10 @@ ${[["SO – Ausbauen","SO"],["WO – Aufholen","WO"],["ST – Absichern","ST"],[
               <div style={{fontSize:28,marginBottom:14}}>⚙️</div>
               <div style={{fontSize:15,fontWeight:600,marginBottom:4}}>Analyse läuft</div>
               <div style={{fontSize:13,color:"#64748b",marginBottom:24}}>Schritt {loadingStep} von {profile.url?2:1}</div>
-              <div style={{maxWidth:320,margin:"0 auto",textAlign:"left"}}>
+              <div style={{maxWidth:340,margin:"0 auto",textAlign:"left"}}>
                 {[
-                  profile.url?`Website analysieren: ${profile.url}`:"Website-Analyse (keine URL angegeben – wird übersprungen)",
-                  "Tiefe Branchenanalyse & Konkurrentenidentifikation",
+                  profile.url?`Website analysieren: ${profile.url}`:"Website-Analyse (keine URL – wird übersprungen)",
+                  "Branchenanalyse: Markt · Wettbewerb · Regulierungen · Trends",
                 ].map((lbl,i)=>{
                   const idx=i+1;
                   const done=loadingStep>idx, active=loadingStep===idx;
