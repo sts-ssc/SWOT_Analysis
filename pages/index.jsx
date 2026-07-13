@@ -55,9 +55,18 @@ function parseList(txt) {
   return result;
 }
 
-async function fetchContext(p, siteText) {
+async function fetchContext(p, siteData) {
   const land = p.country || "Schweiz";
-  const site = siteText ? `\nWebsite-Inhalt:\n${siteText.slice(0, 600)}` : (p.url ? `\nWebsite: ${p.url}` : "");
+  // Unterscheide zwischen echtem Website-Inhalt und nur URL als Hinweis
+  const siteText = typeof siteData === "object" ? siteData.text : (siteData || "");
+  const siteNote = typeof siteData === "object" ? siteData.note : "";
+  
+  const siteContext = siteText && siteText.length > 100
+    ? `\nExtrahierter Website-Inhalt (${siteText.length} Zeichen):\n${siteText.slice(0, 700)}`
+    : p.url
+      ? `\nFirmenwebsite: ${p.url}\nHinweis: ${siteNote||"Nutze dein Trainingswissen ueber dieses Unternehmen aus deinen Trainingsdaten."}`
+      : "";
+
   const FIELDS = ["MARKET","COMPETITION","COMPETITORS","CUSTOMERS","REGULATIONS","TRENDS"];
 
   const getField = (txt, key) => {
@@ -76,27 +85,30 @@ async function fetchContext(p, siteText) {
 
   // Call 1: Markt, Wettbewerb, Konkurrenten, Kunden
   const txt1 = await callClaude(
-`Senior-Unternehmensberater, Fokus ${land}.
+`Du bist Senior-Unternehmensberater mit Fokus ${land}.
+Nutze dein gesamtes Trainingswissen ueber das Unternehmen und die Branche.
+
 Unternehmen: ${p.name}
 Branche: ${p.industry}
 Produkt/Service: ${p.product}
-Groesse: ${p.size}${site}
+Groesse: ${p.size}${siteContext}
 
-Antworte EXAKT in diesem Format (alle Felder vollstaendig):
+Antworte EXAKT in diesem Format (alle Felder vollstaendig ausfuellen):
 MARKET: Marktgroesse CHF, Wachstumsrate, wichtigste Nachfragetreiber in ${land} (3 Saetze)
 COMPETITION: Marktstruktur (fragmentiert/konsolidiert), Wettbewerbertypen, Preisdruck, Differenzierungsmerkmale (3 Saetze)
-COMPETITORS: Die 6 wichtigsten direkten Konkurrenten von ${p.name} fuer das Angebot "${p.product}" in ${land} – nur echte, spezifische Firmennamen die genau diese Leistungen anbieten
+COMPETITORS: Die 6 wichtigsten direkten Konkurrenten von ${p.name} fuer "${p.product}" in ${land} – nur echte spezifische Firmennamen die exakt diese Leistungen anbieten, basierend auf deinem Wissen ueber den Markt
 CUSTOMERS: Typische Kundensegmente, Entscheidungstraeger (Titel), wichtigste Kaufkriterien (2-3 Saetze)
-Deutsch, Schweizer Stil (kein ss).`, 800, "claude-sonnet-4-6");
+Deutsch, Schweizer Stil (kein ss).`, 900, "claude-sonnet-4-6");
 
-  // Call 2: TRENDS zuerst (damit kein Truncation), dann REGULATIONS
+  // Call 2: TRENDS zuerst (verhindert Abschneiden), dann REGULATIONS
   const txt2 = await callClaude(
-`Senior-Berater, Fokus ${land}.
-Branche: ${p.industry} | Unternehmen: ${p.name}
+`Du bist Senior-Berater mit Fokus ${land}.
+Nutze dein Trainingswissen fuer eine praezise, branchenspezifische Analyse.
+Unternehmen: ${p.name} | Branche: ${p.industry} | Produkt: ${p.product}
 
 Antworte EXAKT in diesem Format:
-TRENDS: Die 4 wichtigsten Technologie- und Markttrends fuer ${p.industry} in ${land} in den naechsten 2-3 Jahren – konkret und branchenspezifisch (3-4 Saetze)
-REGULATIONS: Alle fuer ${p.industry} in ${land} tatsaechlich relevanten Regulierungen und Standards – identifiziere selbst was zutrifft, mit kurzer Erklaerung der Relevanz pro Standard (keine generische Liste, nur was fuer diese Branche und diesen Markt gilt)
+TRENDS: Die 4 wichtigsten Technologie- und Markttrends fuer ${p.industry} in ${land} in den naechsten 2-3 Jahren – konkret, benenne spezifische Technologien und Entwicklungen (3-4 Saetze)
+REGULATIONS: Alle fuer ${p.industry} in ${land} relevanten Regulierungen und Standards – nur was tatsaechlich zutrifft, mit kurzer Erklaerung der Relevanz. Sei vollstaendig, lass keine wichtigen Standards aus.
 Deutsch, Schweizer Stil (kein ss).`, 900, "claude-sonnet-4-6");
 
   return {
@@ -106,6 +118,7 @@ Deutsch, Schweizer Stil (kein ss).`, 900, "claude-sonnet-4-6");
     customers:       getField(txt1, "CUSTOMERS"),
     regulations:     getField(txt2, "REGULATIONS"),
     trends:          getField(txt2, "TRENDS"),
+    siteNote:        siteNote,
   };
 }
 
@@ -231,17 +244,17 @@ export default function SWOTApp() {
   const startAnalysis = async () => {
     if(!profile.name||!profile.industry||!profile.product){ showToast("Bitte Name, Branche und Produkt ausfüllen"); return; }
     setGenError(""); setLoading(true);
-    let siteText="";
+    let siteData = { text: "", chars: 0, success: false, note: "" };
     try {
       if(profile.url) {
         setLoadingStep(1);
         try {
           const r=await fetch("/api/scrape",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({url:profile.url})});
-          siteText=(await r.json()).text||"";
-        } catch(e) { /* Website nicht erreichbar – weiter ohne */ }
+          siteData=await r.json();
+        } catch(e) { /* Website nicht erreichbar */ }
       }
       setLoadingStep(2);
-      const ctx=await fetchContext(profile,siteText);
+      const ctx=await fetchContext(profile, siteData);
       const nd={context:ctx};
       setAiData(nd); save({aiData:nd,step:1}); setStep(1);
     } catch(e){ setGenError(e.message||String(e)); }
@@ -449,6 +462,13 @@ ${[["SO – Ausbauen","SO"],["WO – Aufholen","WO"],["ST – Absichern","ST"],[
             <div>
               <h2 style={{fontSize:16,fontWeight:600,marginBottom:4}}>Branchenanalyse – {profile.name}</h2>
               <p style={{fontSize:13,color:"#64748b",marginBottom:14}}>KI-gestützte Analyse von Markt, Wettbewerb, Kunden, Regulierung und Trends.</p>
+              {profile.url && (
+                <div style={{background: aiData.context.siteNote?.includes("Trainingswissen") ? "#fef9c3" : "#f0fdf4", border: `0.5px solid ${aiData.context.siteNote?.includes("Trainingswissen") ? "#fde68a" : "#bbf7d0"}`, borderRadius:8, padding:"8px 12px", marginBottom:12, fontSize:12, color: aiData.context.siteNote?.includes("Trainingswissen") ? "#92400e" : "#15803d"}}>
+                  🌐 {aiData.context.siteNote?.includes("Trainingswissen")
+                    ? `Website (${profile.url}): JavaScript-gerendert – KI nutzt Trainingswissen über das Unternehmen`
+                    : `Website analysiert: ${aiData.context.siteNote}`}
+                </div>
+              )}
               <div style={S.g2}>
                 {[["📊 Markt",aiData.context.market],["🏢 Wettbewerb",aiData.context.competitors],["👥 Kunden",aiData.context.customers],["📈 Trends",aiData.context.trends]].map(([t,v])=>(
                   <div key={t} style={S.card}>
