@@ -392,23 +392,55 @@ export default function SWOTApp() {
     setTwLoad(true); setTwText(""); setTwError("");
     try {
       const txt=await callClaude(
-`TOWS-Strategien fuer ${profile.name} (${profile.industry}, ${profile.country||"Schweiz"}).
+`Du bist TOWS-Strategie-Berater. Erstelle konkrete Handlungsstrategien.
+${profile.name} | ${profile.industry} | ${profile.country||"Schweiz"}
+
 Staerken: ${items.strengths.join(" | ")||"–"}
 Schwaechen: ${items.weaknesses.join(" | ")||"–"}
 Chancen: ${items.opportunities.join(" | ")||"–"}
 Risiken: ${items.threats.join(" | ")||"–"}
-Format exakt:
-SO:\n- Massnahme 1\n- Massnahme 2\n- Massnahme 3\n\nWO:\n- Massnahme 1\n- Massnahme 2\n- Massnahme 3\n\nST:\n- Massnahme 1\n- Massnahme 2\n- Massnahme 3\n\nWT:\n- Massnahme 1\n- Massnahme 2\n- Massnahme 3
-Deutsch, kein ss.`,600,"claude-sonnet-4-6");
-      const getSec=(key)=>{
-        const idx=txt.indexOf("\n"+key+":"); if(idx===-1) return "";
-        const after=txt.slice(idx+key.length+2).trimStart();
-        const nk=["SO","WO","ST","WT"].filter(k=>k!==key);
-        const nm=after.match(new RegExp("\\n(?:"+nk.join("|")+"):"));
-        const c=nm?after.slice(0,nm.index):after;
-        return c.split("\n").map(l=>l.replace(/^[-•*\d\.]+\s*/,"").trim()).filter(Boolean).join("\n");
+
+Antworte EXAKT in diesem Format (alle 4 Sektionen vollstaendig ausfuellen):
+
+SO:
+- Massnahme basierend auf Staerken und Chancen
+- Zweite Massnahme
+- Dritte Massnahme
+
+WO:
+- Massnahme basierend auf Schwaechen und Chancen
+- Zweite Massnahme
+- Dritte Massnahme
+
+ST:
+- Massnahme basierend auf Staerken und Risiken
+- Zweite Massnahme
+- Dritte Massnahme
+
+WT:
+- Massnahme basierend auf Schwaechen und Risiken
+- Zweite Massnahme
+- Dritte Massnahme
+
+Deutsch, kein ss. Konkret und umsetzbar.`,700,"claude-sonnet-4-6");
+
+      // Robuster Parser: funktioniert auch wenn SO am Anfang oder WT am Ende steht
+      const getSec = (key) => {
+        // Suche mit und ohne führende Newline (für erste Sektion)
+        const re = new RegExp("(?:^|\\n)" + key + ":\\s*\\n");
+        const match = txt.match(re);
+        if (!match) return "";
+        const startIdx = (match.index||0) + match[0].length;
+        const remaining = txt.slice(startIdx);
+        // Nächste Sektion finden
+        const nextRe = /\n(?:SO|WO|ST|WT):\s*\n/;
+        const nextMatch = remaining.match(nextRe);
+        const content = nextMatch ? remaining.slice(0, nextMatch.index) : remaining;
+        return content.split("\n").map(l=>l.replace(/^[-•*\d\.]+\s*/,"").trim()).filter(Boolean).join("\n");
       };
-      setStrats({SO:getSec("SO"),WO:getSec("WO"),ST:getSec("ST"),WT:getSec("WT")});
+
+      const result = { SO:getSec("SO"), WO:getSec("WO"), ST:getSec("ST"), WT:getSec("WT") };
+      setStrats(result);
       setTwText("✓ Strategien in Boxen eingetragen – bei Bedarf bearbeiten.");
     } catch(e){ setTwError(e.message||String(e)); }
     setTwLoad(false);
