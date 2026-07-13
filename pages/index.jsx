@@ -392,7 +392,7 @@ export default function SWOTApp() {
     setTwLoad(true); setTwText(""); setTwError("");
     try {
       const txt=await callClaude(
-`Du bist TOWS-Strategie-Berater. Erstelle konkrete Handlungsstrategien.
+`Du bist TOWS-Strategie-Berater. Erstelle konkrete, praegnante Handlungsstrategien.
 ${profile.name} | ${profile.industry} | ${profile.country||"Schweiz"}
 
 Staerken: ${items.strengths.join(" | ")||"–"}
@@ -400,29 +400,29 @@ Schwaechen: ${items.weaknesses.join(" | ")||"–"}
 Chancen: ${items.opportunities.join(" | ")||"–"}
 Risiken: ${items.threats.join(" | ")||"–"}
 
-Antworte EXAKT in diesem Format (alle 4 Sektionen vollstaendig ausfuellen):
+Antworte EXAKT in diesem Format (alle 4 Sektionen vollstaendig, max 2 Saetze pro Massnahme):
 
 SO:
-- Massnahme basierend auf Staerken und Chancen
-- Zweite Massnahme
-- Dritte Massnahme
+- Massnahme 1 (Staerke nutzen um Chance zu ergreifen)
+- Massnahme 2
+- Massnahme 3
 
 WO:
-- Massnahme basierend auf Schwaechen und Chancen
-- Zweite Massnahme
-- Dritte Massnahme
+- Massnahme 1 (Schwaeche durch Chance kompensieren)
+- Massnahme 2
+- Massnahme 3
 
 ST:
-- Massnahme basierend auf Staerken und Risiken
-- Zweite Massnahme
-- Dritte Massnahme
+- Massnahme 1 (Staerke einsetzen um Risiko abzuwehren)
+- Massnahme 2
+- Massnahme 3
 
 WT:
-- Massnahme basierend auf Schwaechen und Risiken
-- Zweite Massnahme
-- Dritte Massnahme
+- Massnahme 1 (Schwaeche und Risiko gleichzeitig minimieren)
+- Massnahme 2
+- Massnahme 3
 
-Deutsch, kein ss. Konkret und umsetzbar.`,700,"claude-sonnet-4-6");
+Deutsch, kein ss. Jede Massnahme max 2 Saetze – praegnant und konkret.`,1200,"claude-sonnet-4-6");
 
       // Robuster Parser: funktioniert auch wenn SO am Anfang oder WT am Ende steht
       const getSec = (key) => {
