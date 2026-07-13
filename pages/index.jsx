@@ -122,22 +122,96 @@ Deutsch, Schweizer Stil (kein ss).`, 900, "claude-sonnet-4-6");
   };
 }
 
-async function fetchCategory(cat, p, ctx, assessment) {
-  const labels = { strengths:"Staerken", weaknesses:"Schwaechen", opportunities:"Chancen", threats:"Risiken" };
-  const assessText = assessment ? `\nEinschaetzung des Nutzers: ${assessment}` : "";
-  const txt = await callClaude(
-`6 ${labels[cat]} fuer ${p.name} (${p.industry}, ${p.country||"Schweiz"}).
-Markt: ${(ctx.market||"").slice(0,100)}${assessText}
-Format exakt:
-1. Bezeichnung | Begruendung
-2. Bezeichnung | Begruendung
-3. Bezeichnung | Begruendung
-4. Bezeichnung | Begruendung
-5. Bezeichnung | Begruendung
-6. Bezeichnung | Begruendung
-Deutsch, max 8+12 Woerter.`, 300);
-  return parseList(txt);
+// ── Dialogue AI Functions ─────────────────────────────────────────────────────
+
+const CAT_LABELS = {
+  strengths:    { de:"Stärken",   focus:"Was macht das Unternehmen besser als die Konkurrenz? Warum kommen Kunden, warum bleiben sie?" },
+  weaknesses:   { de:"Schwächen", focus:"Wo hat das Unternehmen Defizite? Was macht die Konkurrenz besser? Was kostet Aufträge?" },
+  opportunities:{ de:"Chancen",   focus:"Welche externen Entwicklungen koennen genutzt werden? Marktveraenderungen, Trends, Regulierung?" },
+  threats:      { de:"Risiken",   focus:"Was bedroht das Geschaeftsmodell? Wettbewerb, Marktveraenderungen, Technologie, Regulierung?" },
+};
+
+function buildConsultantContext(cat, p, ctx) {
+  return `DEINE ROLLE: Du bist ein erfahrener SWOT-Berater mit tiefem Wissen ueber ${p.industry} in ${p.country||"Schweiz"}.
+DEIN ZIEL: Durch gezieltes Gespraech konkrete, belegbare ${CAT_LABELS[cat].de} von ${p.name} identifizieren.
+FOKUS: "${CAT_LABELS[cat].focus}" – du bleibst IMMER bei diesem Thema.
+
+UNTERNEHMEN: ${p.name} | ${p.industry} | ${p.size||""} | ${p.country||"Schweiz"}
+PRODUKT/SERVICE: ${p.product||""}
+WETTBEWERBER: ${ctx.competitorsList||"(unbekannt)"}
+MARKT: ${ctx.market?.slice(0,150)||""}`;
 }
+
+async function generateOpeningQuestion(cat, p, ctx) {
+  return await callClaude(
+`${buildConsultantContext(cat, p, ctx)}
+
+Stelle EINE praezise Eroeffnungsfrage die:
+- Auf dieses Unternehmen, diese Branche und diesen Markt zugeschnitten ist
+- Zum Nachdenken anregt (nicht mit Ja/Nein beantwortbar)
+- Einen konkreten, erfahrbaren Aspekt anspricht (letzter Auftrag, Kundenreaktion, Vergleich mit Konkurrenz)
+- Wie ein Senior-Berater klingt – direkt, respektvoll, kompetent
+
+Nur die Frage, kein Praeambel. Max 2 Saetze. Deutsch, kein ss.`, 180, "claude-sonnet-4-6");
+}
+
+async function continueDialogue(cat, history, p, ctx) {
+  const histTxt = history.map(m=>`${m.role==="ai"?"Berater":"Nutzer"}: ${m.text}`).join("\n\n");
+  const rounds = history.filter(m=>m.role==="user").length;
+  const lastUser = (history.filter(m=>m.role==="user").slice(-1)[0]?.text||"").toLowerCase();
+
+  const cantAnswer = /kann (ich |mich |das )?(nicht|keine)|weiss (ich )?nicht|keine ahnung|schwer zu sagen|unsicher|nicht sicher|unbekannt|hab (da |k)eine/i.test(lastUser);
+  const multiplePoints = lastUser.split(/,|;|oder|ausserdem|zudem|erstens|zweitens|einerseits/).length >= 3;
+
+  return await callClaude(
+`${buildConsultantContext(cat, p, ctx)}
+
+DIALOG (${rounds} Antworten bisher):
+${histTxt}
+
+DEINE BERATER-GRUNDSAETZE:
+1. Antworte dynamisch auf das Gesagte – keine vordefinierten Fragen
+2. Referenziere konkret was der Nutzer sagte ("Sie erwaehnen X – das ist interessant, weil...")
+3. Stelle immer NUR EINE konkrete Folgefrage (nie mehrere gleichzeitig)
+4. Bleibe fokussiert auf "${CAT_LABELS[cat].de}" – lenke sanft zurueck wenn Abdriften droht
+5. Zeige Branchenwissen: Nenne konkrete Beispiele, Zahlen, Vergleiche mit Wettbewerbern
+
+${cantAnswer ? `SITUATION: Nutzer konnte nicht antworten.
+→ Anerkenne das explizit: "Dass Sie das nicht direkt sagen koennen, ist selbst eine relevante Erkenntnis."
+→ Stelle eine ALTERNATIVE Frage aus anderer Perspektive (konkreter, situativer, z.B. statt abstrakter Kundenperspektive: "Denken Sie an den letzten Auftrag den Sie gewonnen haben – was hat den Ausschlag gegeben?")` : ""}
+
+${multiplePoints && !cantAnswer ? `SITUATION: Nutzer hat mehrere Aspekte genannt.
+→ Erkenne alle explizit an ("Das sind gleich mehrere wichtige Punkte – namentlich X, Y und Z.")
+→ Fokussiere auf den staerksten oder frage: "Was davon ist aus Ihrer Sicht der wichtigste Unterschied zum Wettbewerb?"` : ""}
+
+${rounds >= 3 ? `SITUATION: ${rounds} Antworten vorhanden – gute Grundlage.
+→ Fasse kurz zusammen was du gehoert hast UND schlage am Ende vor: "Ich denke, wir haben genug Material fuer eine fundierte Analyse. Klicken Sie auf [Punkte ableiten] wenn Sie bereit sind – oder wir koennen noch einen Aspekt vertiefen."` : ""}
+
+Schreibe jetzt deine Beraterantwort. Max 3-4 Saetze. Direkt, praezise, kein Bullshit-Bingo. Deutsch, kein ss.`, 400, "claude-sonnet-4-6");
+}
+
+async function extractSWOTPoints(cat, history, p) {
+  const histTxt = history.map(m=>`${m.role==="ai"?"Berater":"Nutzer"}: ${m.text}`).join("\n\n");
+  return parseList(await callClaude(
+`Du bist SWOT-Analyst. Leite aus diesem Beratungsgespraech alle relevanten ${CAT_LABELS[cat].de} fuer ${p.name} ab.
+
+GESPRAECH:
+${histTxt}
+
+ABLEITUNGSREGELN:
+- Nutzer konnte Frage NICHT beantworten → eigener Punkt (z.B. "Keine Kenntnis der eigenen Marktposition" oder "Kundenperspektive unbekannt")
+- Nutzer nannte MEHRERE Gruende → jeden als separaten Punkt erfassen
+- Indirekte Hinweise und implizite Aussagen ebenfalls verwerten
+- Nur was im Gespraech erwaehnt oder bestaetigt wurde – keine Spekulationen
+
+Antworte NUR mit nummerierten Punkten (keine Einleitung, kein Kommentar):
+1. Konkreter Punkt (5-8 Woerter) | Begruendung/Bezug aus Gespraech
+2. Punkt | Begruendung
+(3-6 Punkte)
+Deutsch, kein ss.`, 450, "claude-sonnet-4-6"));
+}
+
+
 
 const S = {
   page:  { fontFamily:"system-ui,-apple-system,sans-serif", background:"#f1f5f9", minHeight:"100vh", fontSize:14, color:"#1e293b" },
@@ -197,33 +271,45 @@ export default function SWOTApp() {
   const [step, setStep]       = useState(0);
   const [profile, setProfile] = useState({
     name:"", industry:"", product:"", url:"", country:"Schweiz",
-    size:"KMU (50–249 MA)", scope:"Gesamtes Unternehmen", goal:"",
-    assessments:{ strengths:"", weaknesses:"", opportunities:"", threats:"" }
+    size:"KMU (50–249 MA)", scope:"Gesamtes Unternehmen", goal:""
   });
-  const [items, setItems]     = useState({ strengths:[], weaknesses:[], opportunities:[], threats:[] });
-  const [strategies, setStrats]= useState({ SO:"", WO:"", ST:"", WT:"" });
-  const [aiData, setAiData]   = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [items, setItems]       = useState({ strengths:[], weaknesses:[], opportunities:[], threats:[] });
+  const [strategies, setStrats] = useState({ SO:"", WO:"", ST:"", WT:"" });
+  const [aiData, setAiData]     = useState(null);
+  const [loading, setLoading]   = useState(false);
   const [loadingStep, setLoadingStep] = useState(0);
-  const [catLoading, setCatLoading]   = useState({ strengths:false, weaknesses:false, opportunities:false, threats:false });
-  const [genError, setGenError]= useState("");
-  const [newText, setNewText] = useState({ strengths:"", weaknesses:"", opportunities:"", threats:"" });
-  const [twLoading, setTwLoad]= useState(false);
-  const [twText, setTwText]   = useState("");
-  const [twError, setTwError] = useState("");
-  const [toast, setToast]     = useState("");
+  // Dialogue state per category
+  const [convos, setConvos]     = useState({ strengths:[], weaknesses:[], opportunities:[], threats:[] });
+  const [userInput, setUserInput]= useState({ strengths:"", weaknesses:"", opportunities:"", threats:"" });
+  const [catLoading, setCatLoading] = useState({ strengths:false, weaknesses:false, opportunities:false, threats:false });
+  const [deriving, setDeriving] = useState({ strengths:false, weaknesses:false, opportunities:false, threats:false });
+  const [genError, setGenError] = useState("");
+  const [newText, setNewText]   = useState({ strengths:"", weaknesses:"", opportunities:"", threats:"" });
+  const [twLoading, setTwLoad]  = useState(false);
+  const [twText, setTwText]     = useState("");
+  const [twError, setTwError]   = useState("");
+  const [toast, setToast]       = useState("");
 
   useEffect(() => {
     try {
       const s = localStorage.getItem(STORAGE_KEY);
-      if (s) { const d=JSON.parse(s); if(d.profile)setProfile(d.profile); if(d.items)setItems(d.items); if(d.strategies)setStrats(d.strategies); if(d.aiData)setAiData(d.aiData); if(d.step)setStep(d.step); }
+      if (s) {
+        const d=JSON.parse(s);
+        if(d.profile)   setProfile(d.profile);
+        if(d.items)     setItems(d.items);
+        if(d.strategies)setStrats(d.strategies);
+        if(d.aiData)    setAiData(d.aiData);
+        if(d.step)      setStep(d.step);
+        if(d.convos)    setConvos(d.convos);
+      }
     } catch(e) {}
   }, []);
 
-  const save = (ov={}) => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify({profile,items,strategies,aiData,step,...ov})); } catch(e){} };
+  const save = (ov={}) => {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({profile,items,strategies,aiData,step,convos,...ov})); } catch(e){}
+  };
   const showToast = (m) => { setToast(m); setTimeout(()=>setToast(""),3000); };
   const upProfile = (f,v) => setProfile(p=>({...p,[f]:v}));
-  const upAssessment = (cat,v) => setProfile(p=>({...p,assessments:{...p.assessments,[cat]:v}}));
 
   const addItem = (cat) => {
     const v=(newText[cat]||"").trim(); if(!v) return;
@@ -234,11 +320,41 @@ export default function SWOTApp() {
     const u={...items,[cat]:items[cat].filter((_,i)=>i!==idx)};
     setItems(u); save({items:u});
   };
-  const acceptSug = (cat,idx) => {
-    const item=aiData?.[cat]?.[idx]?.item;
-    if(!item||items[cat].includes(item)) return;
-    const u={...items,[cat]:[...items[cat],item]};
-    setItems(u); save({items:u});
+
+  // ── Dialogue handlers ──────────────────────────────────────────────────────
+  const startDialogue = async (cat) => {
+    if(!aiData?.context) return;
+    setCatLoading(l=>({...l,[cat]:true}));
+    try {
+      const q = await generateOpeningQuestion(cat, profile, aiData.context);
+      const newConvos = {...convos,[cat]:[{role:"ai",text:q}]};
+      setConvos(newConvos); save({convos:newConvos});
+    } catch(e){ showToast("Fehler: "+e.message); }
+    setCatLoading(l=>({...l,[cat]:false}));
+  };
+
+  const sendMessage = async (cat) => {
+    const txt=(userInput[cat]||"").trim(); if(!txt) return;
+    const newHistory=[...(convos[cat]||[]),{role:"user",text:txt}];
+    const nc={...convos,[cat]:newHistory};
+    setConvos(nc); setUserInput(u=>({...u,[cat]:""}));
+    setCatLoading(l=>({...l,[cat]:true}));
+    try {
+      const reply=await continueDialogue(cat,newHistory,profile,aiData.context);
+      const nc2={...convos,[cat]:[...newHistory,{role:"ai",text:reply}]};
+      setConvos(nc2); save({convos:nc2});
+    } catch(e){ showToast("Fehler: "+e.message); }
+    setCatLoading(l=>({...l,[cat]:false}));
+  };
+
+  const derivePoints = async (cat) => {
+    setDeriving(d=>({...d,[cat]:true}));
+    try {
+      const pts=await extractSWOTPoints(cat,convos[cat]||[],profile);
+      const u={...items,[cat]:pts.map(p=>p.item).filter(Boolean)};
+      setItems(u); save({items:u});
+    } catch(e){ showToast("Fehler: "+e.message); }
+    setDeriving(d=>({...d,[cat]:false}));
   };
 
   const startAnalysis = async () => {
@@ -495,83 +611,138 @@ ${[["SO – Ausbauen","SO"],["WO – Aufholen","WO"],["ST – Absichern","ST"],[
             </div>
           )}
 
-          {/* ── SWOT Steps 2–5 ── */}
+          {/* ── SWOT Dialog Steps 2–5 ── */}
           {currentCat&&!loading&&(()=>{
             const cat=currentCat, m=CAT[cat], catItems=items[cat];
-            const sugs=aiData?.[cat]||[];
             const si=CAT_ORDER.indexOf(cat)+2;
-            const count=catItems.length, isLoading=catLoading[cat];
-            const assessment=profile.assessments?.[cat]||"";
+            const count=catItems.length;
+            const history=convos[cat]||[];
+            const isLoading=catLoading[cat];
+            const isDeriving=deriving[cat];
+            const userReplies=history.filter(h=>h.role==="user").length;
+
             return (
               <div>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
                   <h2 style={{fontSize:16,fontWeight:600,margin:0}}>{m.label}</h2>
                   <span style={{fontSize:11,padding:"3px 9px",borderRadius:20,background:count>=3?"#dcfce7":"#fef9c3",color:count>=3?"#15803d":"#a16207"}}>
-                    {count>=3?`✓ ${count} erfasst`:`⚠ ${count} – mind. 3 empfohlen`}
+                    {count>=3?`✓ ${count} Punkte abgeleitet`:`⚠ ${count} Punkte`}
                   </span>
                 </div>
 
-                {/* User Assessment */}
-                <div style={S.card}>
-                  <div style={{fontSize:12,fontWeight:600,color:"#475569",marginBottom:6}}>✏️ Ihre Einschätzung</div>
-                  <p style={{fontSize:12,color:"#64748b",marginBottom:8,lineHeight:1.5}}>
-                    Beschreiben Sie die Situation in Ihren eigenen Worten. Die KI nutzt diese Einschätzung für präzisere Vorschläge.
-                  </p>
-                  <textarea
-                    value={assessment}
-                    onChange={e=>upAssessment(cat,e.target.value)}
-                    rows={4}
-                    placeholder={`z.B. bei ${m.short}: "Wir sind bekannt als..." / "Unser grösster Vorteil ist..." / "Wir kämpfen mit der Herausforderung, dass..."`}
-                    style={{...S.input,resize:"vertical",lineHeight:1.5,marginBottom:10}}
-                  />
-                  <button onClick={()=>generateCategoryItems(cat)} disabled={isLoading}
-                    style={{...S.btnPri,background:m.head,opacity:isLoading?0.7:1}}>
-                    {isLoading?"⏳ Wird generiert...":"✨ KI-Vorschläge generieren"}
-                  </button>
+                {/* Chat interface */}
+                <div style={{...S.card,padding:0,overflow:"hidden"}}>
+                  {/* Chat header */}
+                  <div style={{background:m.head,padding:"10px 16px",display:"flex",alignItems:"center",gap:8}}>
+                    <span style={{fontSize:14}}>🤖</span>
+                    <div>
+                      <div style={{fontSize:12,fontWeight:600,color:"white"}}>KI-Berater – {m.short}</div>
+                      <div style={{fontSize:10,color:"rgba(255,255,255,0.7)"}}>Dialog zur Identifikation Ihrer {m.short}</div>
+                    </div>
+                  </div>
+
+                  {/* Messages */}
+                  <div style={{padding:16,display:"flex",flexDirection:"column",gap:10,maxHeight:420,overflowY:"auto",background:"#f8fafc"}}>
+                    {history.length===0&&!isLoading&&(
+                      <div style={{textAlign:"center",padding:"24px 16px"}}>
+                        <p style={{fontSize:13,color:"#64748b",marginBottom:14,lineHeight:1.6}}>
+                          Der KI-Berater führt Sie durch ein gezieltes Gespräch zu Ihren <strong>{m.short}</strong>. 
+                          Basierend auf Ihrer Branchenanalyse werden individuelle Fragen gestellt.
+                        </p>
+                        <button onClick={()=>startDialogue(cat)} style={{...S.btnPri,background:m.head}}>
+                          Dialog starten →
+                        </button>
+                      </div>
+                    )}
+                    {history.map((msg,i)=>(
+                      <div key={i} style={{display:"flex",gap:8,flexDirection:msg.role==="user"?"row-reverse":"row",alignItems:"flex-start"}}>
+                        <div style={{flexShrink:0,width:28,height:28,borderRadius:"50%",background:msg.role==="ai"?m.head:"#e2e8f0",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,marginTop:2}}>
+                          {msg.role==="ai"?"🤖":"👤"}
+                        </div>
+                        <div style={{maxWidth:"82%",background:msg.role==="ai"?"white":"#e0f2fe",border:`0.5px solid ${msg.role==="ai"?"#e2e8f0":"#bae6fd"}`,borderRadius:msg.role==="ai"?"0 10px 10px 10px":"10px 0 10px 10px",padding:"10px 14px"}}>
+                          <div style={{fontSize:10,fontWeight:600,color:"#94a3b8",marginBottom:4,letterSpacing:"0.3px"}}>
+                            {msg.role==="ai"?"KI-BERATER":"SIE"}
+                          </div>
+                          <div style={{fontSize:13,color:"#1e293b",lineHeight:1.65}}>{msg.text}</div>
+                        </div>
+                      </div>
+                    ))}
+                    {isLoading&&(
+                      <div style={{display:"flex",gap:8,alignItems:"flex-start"}}>
+                        <div style={{flexShrink:0,width:28,height:28,borderRadius:"50%",background:m.head,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13}}>🤖</div>
+                        <div style={{background:"white",border:"0.5px solid #e2e8f0",borderRadius:"0 10px 10px 10px",padding:"10px 14px",color:"#94a3b8",fontSize:13}}>
+                          ⏳ Berater analysiert Ihre Antwort...
+                        </div>
+                      </div>
+                    )}
+                    {isDeriving&&(
+                      <div style={{background:"#f0fdf4",border:"0.5px solid #bbf7d0",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#15803d",textAlign:"center"}}>
+                        ⏳ Punkte werden aus dem Dialog abgeleitet...
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Input area */}
+                  {history.length>0&&!isLoading&&(
+                    <div style={{padding:"12px 16px",borderTop:"0.5px solid #e2e8f0",background:"white"}}>
+                      <textarea
+                        value={userInput[cat]||""}
+                        onChange={e=>setUserInput(u=>({...u,[cat]:e.target.value}))}
+                        onKeyDown={e=>{ if(e.key==="Enter"&&(e.ctrlKey||e.metaKey)) sendMessage(cat); }}
+                        placeholder="Ihre Antwort... (Ctrl+Enter zum Senden)"
+                        rows={3}
+                        style={{...S.input,resize:"none",lineHeight:1.5,marginBottom:8,border:"0.5px solid #d1d5db"}}
+                      />
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                        <div style={{display:"flex",gap:8}}>
+                          {userReplies>=2&&(
+                            <button onClick={()=>derivePoints(cat)} disabled={isDeriving}
+                              style={{...S.btnPri,background:m.head,fontSize:12,padding:"7px 14px"}}>
+                              ✨ Punkte ableiten
+                            </button>
+                          )}
+                        </div>
+                        <button onClick={()=>sendMessage(cat)} disabled={!(userInput[cat]||"").trim()}
+                          style={{...S.btnPri,fontSize:12,padding:"7px 16px",opacity:(userInput[cat]||"").trim()?1:0.5}}>
+                          Antworten →
+                        </button>
+                      </div>
+                      {userReplies>=2&&(
+                        <p style={{fontSize:11,color:"#94a3b8",marginTop:6}}>
+                          💡 Nach 2+ Antworten können Punkte abgeleitet werden. Weitere Fragen vertiefen die Analyse.
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
 
-                {/* Suggestions + Selected */}
-                {(sugs.length>0||count>0)&&(
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
-                    <div style={S.card}>
-                      <div style={{fontSize:12,fontWeight:500,color:"#475569",marginBottom:8}}>
-                        ✨ KI-Vorschläge <span style={{fontSize:10,color:"#94a3b8"}}>(klicken zum Übernehmen)</span>
-                      </div>
-                      {sugs.length===0
-                        ?<p style={{fontSize:12,color:"#94a3b8"}}>Einschätzung eingeben und Button drücken.</p>
-                        :<div style={{display:"flex",flexDirection:"column",gap:5}}>
-                          {sugs.map((sg,i)=><SugCard key={i} item={sg.item} reason={sg.reason} accepted={catItems.includes(sg.item)} onClick={()=>acceptSug(cat,i)} />)}
-                        </div>}
+                {/* Derived / confirmed items */}
+                {count>0&&(
+                  <div style={{...S.card,border:`0.5px solid ${m.head}30`,marginTop:0}}>
+                    <div style={{fontSize:12,fontWeight:600,color:m.text,marginBottom:8,display:"flex",justifyContent:"space-between"}}>
+                      <span>✓ Abgeleitete {m.short} ({count})</span>
+                      <span style={{fontSize:11,fontWeight:400,color:"#94a3b8"}}>bearbeiten oder ergänzen</span>
                     </div>
-                    <div>
-                      <div style={{...S.card,border:`0.5px solid ${m.head}30`}}>
-                        <div style={{fontSize:12,fontWeight:500,color:m.text,marginBottom:8,display:"flex",justifyContent:"space-between"}}>
-                          <span>Ihre {m.short}</span>
-                          <span style={{fontWeight:400,color:"#94a3b8"}}>{count} Punkt{count!==1?"e":""}</span>
+                    <div style={{display:"flex",flexDirection:"column",gap:5,marginBottom:10}}>
+                      {catItems.map((it,i)=>(
+                        <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 10px",borderRadius:6,border:`0.5px solid ${m.head}20`,background:m.bg}}>
+                          <span style={{fontSize:12,color:m.text}}>• {it}</span>
+                          <button onClick={()=>removeItem(cat,i)} style={{background:"none",border:"none",cursor:"pointer",color:"#94a3b8",fontSize:16,lineHeight:1,padding:"0 0 0 6px",fontFamily:"inherit"}}>×</button>
                         </div>
-                        <div style={{display:"flex",flexDirection:"column",gap:5,marginBottom:10}}>
-                          {count===0
-                            ?<p style={{fontSize:12,color:"#94a3b8",margin:0}}>Vorschläge anklicken oder unten eingeben.</p>
-                            :catItems.map((it,i)=>(
-                              <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 10px",borderRadius:6,border:`0.5px solid ${m.head}20`,background:m.bg}}>
-                                <span style={{fontSize:12,color:m.text}}>• {it}</span>
-                                <button onClick={()=>removeItem(cat,i)} style={{background:"none",border:"none",cursor:"pointer",color:"#94a3b8",fontSize:16,lineHeight:1,padding:"0 0 0 6px",fontFamily:"inherit"}}>×</button>
-                              </div>
-                            ))}
-                        </div>
-                        <div style={{borderTop:"0.5px solid #f1f5f9",paddingTop:10}}>
-                          <div style={{fontSize:11,color:"#94a3b8",marginBottom:5}}>Eigenen Punkt hinzufügen:</div>
-                          <div style={{display:"flex",gap:6}}>
-                            <input type="text" value={newText[cat]} onChange={e=>setNewText(p=>({...p,[cat]:e.target.value}))}
-                              onKeyDown={e=>e.key==="Enter"&&addItem(cat)} placeholder="Ergänzung..."
-                              style={{flex:1,padding:"8px 10px",border:"0.5px solid #e2e8f0",borderRadius:6,fontSize:13,fontFamily:"inherit"}} />
-                            <button onClick={()=>addItem(cat)} style={{...S.btnPri,background:m.head,padding:"8px 14px",fontSize:16}}>+</button>
-                          </div>
-                        </div>
+                      ))}
+                    </div>
+                    <div style={{borderTop:"0.5px solid #f1f5f9",paddingTop:10}}>
+                      <div style={{fontSize:11,color:"#94a3b8",marginBottom:5}}>Eigenen Punkt manuell hinzufügen:</div>
+                      <div style={{display:"flex",gap:6}}>
+                        <input type="text" value={newText[cat]} onChange={e=>setNewText(p=>({...p,[cat]:e.target.value}))}
+                          onKeyDown={e=>e.key==="Enter"&&addItem(cat)} placeholder="Ergänzung..."
+                          style={{flex:1,padding:"8px 10px",border:"0.5px solid #e2e8f0",borderRadius:6,fontSize:13,fontFamily:"inherit"}} />
+                        <button onClick={()=>addItem(cat)} style={{...S.btnPri,background:m.head,padding:"8px 14px",fontSize:16}}>+</button>
                       </div>
                     </div>
                   </div>
                 )}
+
                 <NavRow onBack={()=>setStep(si-1)} onNext={()=>{save({step:si+1});setStep(si+1);}} />
               </div>
             );
