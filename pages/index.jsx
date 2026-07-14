@@ -390,64 +390,39 @@ export default function SWOTApp() {
 
   const generateTOWS = async () => {
     setTwLoad(true); setTwText(""); setTwError("");
-    try {
-      const base = `${profile.name} | ${profile.industry} | ${profile.country||"Schweiz"}
+
+    const swotCtx = `${profile.name} | ${profile.industry} | ${profile.country||"Schweiz"}
 Staerken: ${items.strengths.join(" | ")||"–"}
 Schwaechen: ${items.weaknesses.join(" | ")||"–"}
 Chancen: ${items.opportunities.join(" | ")||"–"}
 Risiken: ${items.threats.join(" | ")||"–"}`;
 
-      const buildPrompt = (sections) =>
-`TOWS-Berater. Konkrete, praegnante Strategien fuer:
-${base}
+    const buildBox = async (title, what, progress) => {
+      setTwText(`⏳ ${progress}/4 – ${title} wird generiert...`);
+      const txt = await callClaude(
+`TOWS-Berater. Erstelle 3 ${title}-Strategien.
+${swotCtx}
 
-${sections}
-Antworte EXAKT in diesem Format. Jede Massnahme: 1-2 Saetze, max 30 Woerter. Deutsch, kein ss.`;
+AUFGABE: ${what}
+Antworte NUR mit nummerierten Punkten (keine Einleitung):
+1. Konkrete Massnahme, max 2 Saetze
+2. Konkrete Massnahme, max 2 Saetze
+3. Konkrete Massnahme, max 2 Saetze
+Deutsch, kein ss.`, 450, "claude-sonnet-4-6");
+      return txt.split("\n").map(l=>l.replace(/^\d+[\.\):]\s*/,"").trim()).filter(Boolean).join("\n");
+    };
 
-      // Call 1: SO + WO
-      const txt1 = await callClaude(buildPrompt(
-`SO:
-- Massnahme 1 (Staerke + Chance)
-- Massnahme 2
-- Massnahme 3
-
-WO:
-- Massnahme 1 (Schwaeche + Chance)
-- Massnahme 2
-- Massnahme 3`), 700, "claude-sonnet-4-6");
-
-      // Call 2: ST + WT
-      const txt2 = await callClaude(buildPrompt(
-`ST:
-- Massnahme 1 (Staerke + Risiko)
-- Massnahme 2
-- Massnahme 3
-
-WT:
-- Massnahme 1 (Schwaeche + Risiko)
-- Massnahme 2
-- Massnahme 3`), 700, "claude-sonnet-4-6");
-
-      const txt = txt1 + "\n" + txt2;
-
-      // Robuster Parser: funktioniert auch wenn SO am Anfang oder WT am Ende steht
-      const getSec = (key) => {
-        // Suche mit und ohne führende Newline (für erste Sektion)
-        const re = new RegExp("(?:^|\\n)" + key + ":\\s*\\n");
-        const match = txt.match(re);
-        if (!match) return "";
-        const startIdx = (match.index||0) + match[0].length;
-        const remaining = txt.slice(startIdx);
-        // Nächste Sektion finden
-        const nextRe = /\n(?:SO|WO|ST|WT):\s*\n/;
-        const nextMatch = remaining.match(nextRe);
-        const content = nextMatch ? remaining.slice(0, nextMatch.index) : remaining;
-        return content.split("\n").map(l=>l.replace(/^[-•*\d\.]+\s*/,"").trim()).filter(Boolean).join("\n");
-      };
-
-      const result = { SO:getSec("SO"), WO:getSec("WO"), ST:getSec("ST"), WT:getSec("WT") };
-      setStrats(result);
-      setTwText("✓ Strategien in Boxen eingetragen – bei Bedarf bearbeiten.");
+    try {
+      const so = await buildBox("SO – Ausbauen",
+        "Nutze STAERKEN um CHANCEN aktiv zu ergreifen.", 1);
+      const wo = await buildBox("WO – Aufholen",
+        "Nutze externe CHANCEN um interne SCHWAECHEN zu kompensieren.", 2);
+      const st = await buildBox("ST – Absichern",
+        "Setze STAERKEN ein um externe RISIKEN abzuwehren.", 3);
+      const wt = await buildBox("WT – Vermeiden",
+        "Minimiere gleichzeitig SCHWAECHEN und externe RISIKEN.", 4);
+      setStrats({ SO:so, WO:wo, ST:st, WT:wt });
+      setTwText("✓ Alle 4 Strategien eingetragen – bei Bedarf bearbeiten.");
     } catch(e){ setTwError(e.message||String(e)); }
     setTwLoad(false);
   };
