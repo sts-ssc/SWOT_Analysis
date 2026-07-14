@@ -391,38 +391,44 @@ export default function SWOTApp() {
   const generateTOWS = async () => {
     setTwLoad(true); setTwText(""); setTwError("");
     try {
-      const txt=await callClaude(
-`Du bist TOWS-Strategie-Berater. Erstelle konkrete, praegnante Handlungsstrategien.
-${profile.name} | ${profile.industry} | ${profile.country||"Schweiz"}
-
+      const base = `${profile.name} | ${profile.industry} | ${profile.country||"Schweiz"}
 Staerken: ${items.strengths.join(" | ")||"–"}
 Schwaechen: ${items.weaknesses.join(" | ")||"–"}
 Chancen: ${items.opportunities.join(" | ")||"–"}
-Risiken: ${items.threats.join(" | ")||"–"}
+Risiken: ${items.threats.join(" | ")||"–"}`;
 
-Antworte EXAKT in diesem Format (alle 4 Sektionen vollstaendig, max 2 Saetze pro Massnahme):
+      const buildPrompt = (sections) =>
+`TOWS-Berater. Konkrete, praegnante Strategien fuer:
+${base}
 
-SO:
-- Massnahme 1 (Staerke nutzen um Chance zu ergreifen)
+${sections}
+Antworte EXAKT in diesem Format. Jede Massnahme: 1-2 Saetze, max 30 Woerter. Deutsch, kein ss.`;
+
+      // Call 1: SO + WO
+      const txt1 = await callClaude(buildPrompt(
+`SO:
+- Massnahme 1 (Staerke + Chance)
 - Massnahme 2
 - Massnahme 3
 
 WO:
-- Massnahme 1 (Schwaeche durch Chance kompensieren)
+- Massnahme 1 (Schwaeche + Chance)
 - Massnahme 2
-- Massnahme 3
+- Massnahme 3`), 700, "claude-sonnet-4-6");
 
-ST:
-- Massnahme 1 (Staerke einsetzen um Risiko abzuwehren)
+      // Call 2: ST + WT
+      const txt2 = await callClaude(buildPrompt(
+`ST:
+- Massnahme 1 (Staerke + Risiko)
 - Massnahme 2
 - Massnahme 3
 
 WT:
-- Massnahme 1 (Schwaeche und Risiko gleichzeitig minimieren)
+- Massnahme 1 (Schwaeche + Risiko)
 - Massnahme 2
-- Massnahme 3
+- Massnahme 3`), 700, "claude-sonnet-4-6");
 
-Deutsch, kein ss. Jede Massnahme max 2 Saetze – praegnant und konkret.`,1200,"claude-sonnet-4-6");
+      const txt = txt1 + "\n" + txt2;
 
       // Robuster Parser: funktioniert auch wenn SO am Anfang oder WT am Ende steht
       const getSec = (key) => {
